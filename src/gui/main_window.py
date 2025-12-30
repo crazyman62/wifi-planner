@@ -190,11 +190,24 @@ class MainWindow(QMainWindow):
         self.spin_y.valueChanged.connect(self.update_floor_transform)
         align_layout.addWidget(self.spin_y)
 
+        # Rotation Controls with 90 deg buttons
+        rot_layout = QHBoxLayout()
+        self.btn_rot_left = QPushButton("-90°")
+        self.btn_rot_left.clicked.connect(self.rotate_left)
+
         self.spin_rot = QDoubleSpinBox()
         self.spin_rot.setRange(-360, 360)
         self.spin_rot.setPrefix("Rot: ")
         self.spin_rot.valueChanged.connect(self.update_floor_transform)
-        align_layout.addWidget(self.spin_rot)
+
+        self.btn_rot_right = QPushButton("+90°")
+        self.btn_rot_right.clicked.connect(self.rotate_right)
+
+        rot_layout.addWidget(self.btn_rot_left)
+        rot_layout.addWidget(self.spin_rot)
+        rot_layout.addWidget(self.btn_rot_right)
+
+        align_layout.addLayout(rot_layout)
 
         self.spin_scale = QDoubleSpinBox()
         self.spin_scale.setRange(0.01, 100.0)
@@ -468,6 +481,14 @@ class MainWindow(QMainWindow):
             # Trigger Heatmap Update? Maybe too heavy.
             pass
 
+    def rotate_left(self):
+        val = self.spin_rot.value()
+        self.spin_rot.setValue(val - 90)
+
+    def rotate_right(self):
+        val = self.spin_rot.value()
+        self.spin_rot.setValue(val + 90)
+
     def toggle_ghost_floor(self):
         idx = self.tabs.currentIndex()
         if self.chk_ghost.isChecked():
@@ -676,7 +697,6 @@ class MainWindow(QMainWindow):
             self.reset_drawing_state()
 
             # Prompt for Height
-            h, ok = QDoubleSpinBox.valueFromText(3.0) # wait, InputDialog logic needed
             h, ok = QInputDialog.getDouble(self, "Ceiling Height", "Enter Ceiling Height (m):", 3.0, 1.0, 50.0, 2)
 
             if ok:
