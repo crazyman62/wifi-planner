@@ -281,7 +281,39 @@ class MainWindow(QMainWindow):
 
         self.status_bar.showMessage("Heatmap generated.")
 
+    def find_snap_point(self, pos, threshold=15):
+        """
+        Finds the closest existing wall endpoint to 'pos'.
+        If within 'threshold', returns the endpoint coordinate.
+        Otherwise returns 'pos'.
+        """
+        closest_point = None
+        min_dist = float('inf')
+
+        # Collect all endpoints
+        endpoints = []
+        for w in self.walls:
+            endpoints.append(w['p1'])
+            endpoints.append(w['p2'])
+
+        for ep in endpoints:
+            dx = pos.x() - ep[0]
+            dy = pos.y() - ep[1]
+            dist = math.sqrt(dx*dx + dy*dy)
+            if dist < threshold:
+                if dist < min_dist:
+                    min_dist = dist
+                    closest_point = QPointF(ep[0], ep[1])
+
+        if closest_point:
+            return closest_point
+        return pos
+
     def handle_canvas_click(self, point):
+        # Apply snapping if applicable
+        if self.current_mode in ["DRAW_WALL"]:
+            point = self.find_snap_point(point)
+
         if self.current_mode == "CALIBRATE":
             if not self.drawing_start_point:
                 self.drawing_start_point = point
@@ -334,17 +366,8 @@ class MainWindow(QMainWindow):
                     # We don't remove it, we just dissociate reference
                     self.temp_line_item = None
 
-                self.drawing_start_point = point # Polyline behavior? No requirements said "connected line segments"
-                # If connected behavior is desired, we keep start point as end point.
-                # Requirement: "Users must be able to confirm, delete, or manually draw/stretch wall segments."
-                # "Allow drawing connected line segments" was in my plan.
-                # Let's support continuous drawing. Right click (or different mode) to stop?
-                # For simplicity in Phase 1, let's do segment by segment or continuous.
-                # I'll stick to continuous drawing for better UX.
-
-                # Create a new temp line for the next segment immediately
-                # self.drawing_start_point is already set to end_point above
-
+                # Continue drawing (Polyline behavior)
+                self.drawing_start_point = point
                 self.status_bar.showMessage(f"Wall added. Click to continue, or change tool to stop.")
 
         elif self.current_mode == "ADD_AP":
@@ -366,6 +389,10 @@ class MainWindow(QMainWindow):
 
     def handle_canvas_move(self, point):
         if self.current_mode in ["CALIBRATE", "DRAW_WALL"] and self.drawing_start_point:
+            # Snap logic for move
+            if self.current_mode == "DRAW_WALL":
+                point = self.find_snap_point(point)
+
             if not self.temp_line_item:
                 self.temp_line_item = QGraphicsLineItem()
                 pen = self.temp_line_item.pen()
@@ -373,12 +400,22 @@ class MainWindow(QMainWindow):
                 if self.current_mode == "CALIBRATE":
                     pen.setColor(Qt.red)
                     pen.setWidth(2)
+                elif self.current_mode == "DRAW_WALL":
+                    # Use material color
+                    material_name = self.combo_materials.currentText()
+                    color_hex = self.materials_data.get(material_name, {}).get('color', '#0000FF')
+                    pen.setColor(QColor(color_hex))
+                    pen.setWidth(4)
                 else:
                     pen.setColor(Qt.blue)
                     pen.setWidth(2)
 
                 self.temp_line_item.setPen(pen)
                 self.canvas.scene.addItem(self.temp_line_item)
+
+            # If drawing wall, check if material changed mid-draw?
+            # It's better to update pen on move if needed, but for now only on init is fine
+            # unless user changes combo while dragging (unlikely).
 
             line = self.temp_line_item.line()
             line.setP1(self.drawing_start_point)

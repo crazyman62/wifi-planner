@@ -115,19 +115,34 @@ def heatmap_to_pixmap(heatmap, width, height):
     from PySide6.QtGui import QImage, QPixmap
 
     # Normalize or clamp for visualization
-    # Range: -30 dBm (Hot) to -90 dBm (Cold)
-    min_dbm = -90.0
-    max_dbm = -30.0
+    # User Request: Red = Poor (-80), Blue = Great (-50)
+    # Standard Jet: 0 (Blue) -> 255 (Red)
+    # So we want -50 (High) -> 0 (Blue)
+    # And -80 (Low) -> 255 (Red)
 
-    norm = (heatmap - min_dbm) / (max_dbm - min_dbm)
-    norm = np.clip(norm, 0, 1)
+    min_dbm = -80.0 # Poor
+    max_dbm = -50.0 # Great
 
-    # Apply colormap (Jet-like: Blue -> Green -> Red)
+    # Clamp first
+    clamped = np.clip(heatmap, min_dbm, max_dbm)
+
+    # Calculate normalization
+    # If val = -50 (max), we want norm = 0
+    # If val = -80 (min), we want norm = 1
+    # Formula: (max_dbm - val) / (max_dbm - min_dbm)
+    # Check: (-50 - (-50)) / 30 = 0
+    # Check: (-50 - (-80)) / 30 = 30/30 = 1
+
+    norm = (max_dbm - clamped) / (max_dbm - min_dbm)
+
     # OpenCV applies colormaps to 8-bit images (0-255)
     img_u8 = (norm * 255).astype(np.uint8)
 
     # cv2.applyColorMap expects BGR, so we get BGR out
-    # COLORMAP_JET is standard rainbow
+    # COLORMAP_JET is standard rainbow (Blue->Red)
+    # With our inverted norm:
+    # High signal (-50) -> 0 -> Blue
+    # Low signal (-80) -> 255 -> Red
     color_img = cv2.applyColorMap(img_u8, cv2.COLORMAP_JET)
 
     # Mask transparent for very low signal
