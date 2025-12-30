@@ -2,11 +2,16 @@ import json
 import os
 
 def save_project(filepath, image_path, ppm, walls, access_points,
-                 snap_dist=15, heatmap_min=-85, heatmap_max=-30):
+                 snap_dist=15, heatmap_min=-85, heatmap_max=-30,
+                 metadata=None):
     """
     Saves the project state to a JSON file.
     """
+    if metadata is None:
+        metadata = {}
+
     data = {
+        "metadata": metadata,
         "image_path": image_path,
         "pixels_per_meter": ppm,
         "walls": walls,

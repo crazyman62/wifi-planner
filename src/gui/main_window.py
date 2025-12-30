@@ -3,7 +3,7 @@ import json
 import os
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
-                               QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox)
+                               QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox, QInputDialog)
 from PySide6.QtGui import QAction, QIcon, QPen, QColor
 from PySide6.QtCore import Qt, QPointF
 
@@ -26,6 +26,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("WiFi Predictive Planner - Phase 1")
         self.resize(1200, 800)
+
+        # Project Metadata
+        self.project_name = "New Project"
+        self.floor_name = "Floor 1"
+        self.ap_counter = 1
 
         # Central Widget
         central_widget = QWidget()
@@ -120,6 +125,12 @@ class MainWindow(QMainWindow):
         undo_action.triggered.connect(self.undo_last_action)
         edit_menu.addAction(undo_action)
 
+        # Project Menu
+        project_menu = menu_bar.addMenu("&Project")
+        props_action = QAction("Properties", self)
+        props_action.triggered.connect(self.edit_properties)
+        project_menu.addAction(props_action)
+
         # Report Menu
         report_menu = menu_bar.addMenu("&Report")
         export_pdf_action = QAction("Export PDF Report", self)
@@ -173,10 +184,8 @@ class MainWindow(QMainWindow):
         self.combo_band.setCurrentText("5")
         self.sidebar_layout.addWidget(self.combo_band)
 
-        # Calculate Button
-        self.btn_calculate = QPushButton("Generate Heatmap")
-        self.btn_calculate.clicked.connect(self.run_heatmap)
-        self.sidebar_layout.addWidget(self.btn_calculate)
+        # Auto-Heatmap note (Button removed)
+        self.sidebar_layout.addWidget(QLabel("<i>Heatmap updates automatically</i>"))
 
         self.sidebar_layout.addStretch()
 
@@ -252,34 +261,27 @@ class MainWindow(QMainWindow):
                     'material': item.material_name
                 })
             elif isinstance(item, AccessPointItem):
-                # Center position
-                rect = item.rect()
-                # rect is relative to item pos if item pos is set,
-                # OR we just use scenePos() if we move using setPos
-                # AccessPointItem uses setPos? No, we need to check how QGraphicsEllipseItem works.
-                # If we just create it at x,y, its pos() is 0,0 usually unless we moved it.
-                # Since we set flags ItemIsMovable, QGraphicsScene updates item.pos().
-
-                # Correct way to get center:
-                # The item rect is defined as (x-r, y-r, 2r, 2r) relative to local (0,0) usually if we set it that way?
-                # Actually in AccessPointItem.__init__: super().__init__(x - r, y - r, 2 * r, 2 * r)
-                # This constructs the rect in item coordinates. The item's origin is (0,0).
-                # When moved, pos() changes.
-                # Center in Scene Coords = mapToScene(center_of_rect)
-
                 center_local = item.rect().center()
                 center_scene = item.mapToScene(center_local)
-
                 aps_to_save.append({
                     'x': center_scene.x(),
                     'y': center_scene.y(),
-                    'model': item.model_name
+                    'model': item.model_name,
+                    'name': item.name
                 })
 
         if file_path:
+            # Pack metadata into a dict to pass if I update file_io
+            meta = {
+                'project_name': self.project_name,
+                'floor_name': self.floor_name,
+                'next_ap_id': self.ap_counter
+            }
+
             save_project(file_path, self.current_image_path, self.pixels_per_meter,
                          walls_to_save, aps_to_save,
-                         self.snap_threshold, self.heatmap_min_dbm, self.heatmap_max_dbm)
+                         self.snap_threshold, self.heatmap_min_dbm, self.heatmap_max_dbm,
+                         metadata=meta)
             self.status_bar.showMessage(f"Saved to {file_path}")
 
     def open_project(self):
@@ -305,6 +307,12 @@ class MainWindow(QMainWindow):
                 self.heatmap_min_dbm = settings.get("heatmap_min_dbm", -85)
                 self.heatmap_max_dbm = settings.get("heatmap_max_dbm", -30)
 
+                # Load Metadata
+                meta = data.get("metadata", {})
+                self.project_name = meta.get("project_name", "New Project")
+                self.floor_name = meta.get("floor_name", "Floor 1")
+                self.ap_counter = meta.get("next_ap_id", 1)
+
                 # Redraw UI elements (Walls)
 
                 # Re-add walls
@@ -319,8 +327,12 @@ class MainWindow(QMainWindow):
 
                 # Re-add APs
                 for ap in data.get("access_points", []):
-                    ap_item = AccessPointItem(ap['x'], ap['y'], ap['model'])
+                    name = ap.get('name', 'AP')
+                    ap_item = AccessPointItem(ap['x'], ap['y'], ap['model'], name)
                     self.canvas.scene.addItem(ap_item)
+
+                # Trigger heatmap
+                self.trigger_heatmap()
 
                 self.lbl_ppm.setText(f"Scale: {self.pixels_per_meter:.2f} px/m")
                 self.status_bar.showMessage(f"Project loaded: {os.path.basename(file_path)}")
@@ -330,6 +342,7 @@ class MainWindow(QMainWindow):
     def undo_last_action(self):
         if self.undo_stack.undo():
             self.status_bar.showMessage("Undo successful.")
+            self.trigger_heatmap()
         else:
             self.status_bar.showMessage("Nothing to undo.")
 
@@ -342,6 +355,7 @@ class MainWindow(QMainWindow):
                 cmd = DeleteCommand(scene, selected_items)
                 self.undo_stack.push(cmd)
                 self.status_bar.showMessage(f"Deleted {len(selected_items)} items.")
+                self.trigger_heatmap()
         else:
             super().keyPressEvent(event)
 
@@ -358,6 +372,10 @@ class MainWindow(QMainWindow):
 
         self.status_bar.showMessage("Generating Report...")
         QApplication.processEvents()
+
+        # Ensure heatmap is up to date
+        self.trigger_heatmap()
+        QApplication.processEvents() # Render updates
 
         # Capture Scene
         # We need to capture the full scene, not just the visible part
@@ -380,14 +398,14 @@ class MainWindow(QMainWindow):
         aps_list = []
         for item in self.canvas.scene.items():
             if isinstance(item, AccessPointItem):
-                aps_list.append({'model': item.model_name})
+                aps_list.append({'model': item.model_name, 'name': item.name})
 
         # Generate PDF
         try:
-            project_name = os.path.splitext(os.path.basename(file_path))[0]
             report = PDFReport(file_path)
             report.generate_report(
-                project_name=project_name,
+                project_name=self.project_name,
+                floor_name=self.floor_name,
                 map_image_path=temp_img_path,
                 access_points=aps_list,
                 min_dbm=self.heatmap_min_dbm,
@@ -422,6 +440,7 @@ class MainWindow(QMainWindow):
                     # Update start pos to current
                     self.selected_item_start_pos = new_pos
                     self.status_bar.showMessage("AP Moved.")
+                    self.trigger_heatmap()
 
     def open_settings(self):
         dialog = SettingsDialog(self.heatmap_min_dbm, self.heatmap_max_dbm, self.snap_threshold, self)
@@ -432,13 +451,17 @@ class MainWindow(QMainWindow):
             self.snap_threshold = vals[2]
             self.status_bar.showMessage("Settings saved.")
 
-    def run_heatmap(self):
+    def trigger_heatmap(self):
+        # Wrapper for auto-update
+        self.run_heatmap(auto=True)
+
+    def run_heatmap(self, auto=False):
         if not self.canvas.pixmap_item:
-            self.status_bar.showMessage("No image loaded.")
+            if not auto: self.status_bar.showMessage("No image loaded.")
             return
 
         if self.pixels_per_meter <= 0:
-            self.status_bar.showMessage("Please calibrate first.")
+            if not auto: self.status_bar.showMessage("Please calibrate first.")
             return
 
         # Gather data from Scene
@@ -462,7 +485,11 @@ class MainWindow(QMainWindow):
                 })
 
         if not current_aps:
-            self.status_bar.showMessage("Place at least one AP.")
+            if not auto: self.status_bar.showMessage("Place at least one AP.")
+            # Clear heatmap if no APs
+            if self.heatmap_item:
+                self.canvas.scene.removeItem(self.heatmap_item)
+                self.heatmap_item = None
             return
 
         self.status_bar.showMessage("Generating Heatmap...")
@@ -499,6 +526,15 @@ class MainWindow(QMainWindow):
         self.canvas.scene.addItem(self.heatmap_item)
 
         self.status_bar.showMessage("Heatmap generated.")
+
+    def edit_properties(self):
+        p_name, ok1 = QInputDialog.getText(self, "Project Properties", "Project Name:", text=self.project_name)
+        if ok1:
+            f_name, ok2 = QInputDialog.getText(self, "Project Properties", "Floor Name:", text=self.floor_name)
+            if ok2:
+                self.project_name = p_name
+                self.floor_name = f_name
+                self.setWindowTitle(f"WiFi Planner - {self.project_name} - {self.floor_name}")
 
     def find_snap_point(self, pos):
         """
@@ -587,17 +623,27 @@ class MainWindow(QMainWindow):
                     self.canvas.scene.removeItem(self.temp_line_item)
                     self.temp_line_item = None
 
+                # Trigger Heatmap
+                self.trigger_heatmap()
+
                 # Continue drawing (Polyline behavior)
                 self.drawing_start_point = point
                 self.status_bar.showMessage(f"Wall added. Click to continue, or change tool to stop.")
 
         elif self.current_mode == "ADD_AP":
             model_name = self.combo_aps.currentText()
-            ap_item = AccessPointItem(point.x(), point.y(), model_name)
+
+            # Auto-Naming
+            ap_name = f"AP{self.ap_counter:02}"
+            self.ap_counter += 1
+
+            ap_item = AccessPointItem(point.x(), point.y(), model_name, ap_name)
 
             # Use Command
             cmd = AddAPCommand(self.canvas.scene, ap_item)
             self.undo_stack.push(cmd)
+
+            self.trigger_heatmap()
 
             self.status_bar.showMessage(f"Added AP: {model_name}")
 
