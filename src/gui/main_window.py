@@ -14,8 +14,12 @@ from src.gui.items import WallItem, AccessPointItem
 from src.engine.heatmap import generate_heatmap, heatmap_to_pixmap
 from src.utils.file_io import save_project, load_project
 from src.utils.command_invoker import UndoStack, AddWallCommand, AddAPCommand, DeleteCommand, MoveCommand
+from src.utils.report_generator import PDFReport
+from PySide6.QtCore import QRectF
+from PySide6.QtGui import QPainter, QImage
 import math
 import json
+import os
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -115,6 +119,12 @@ class MainWindow(QMainWindow):
         undo_action.setShortcut("Ctrl+Z")
         undo_action.triggered.connect(self.undo_last_action)
         edit_menu.addAction(undo_action)
+
+        # Report Menu
+        report_menu = menu_bar.addMenu("&Report")
+        export_pdf_action = QAction("Export PDF Report", self)
+        export_pdf_action.triggered.connect(self.export_report)
+        report_menu.addAction(export_pdf_action)
 
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
@@ -334,6 +344,61 @@ class MainWindow(QMainWindow):
                 self.status_bar.showMessage(f"Deleted {len(selected_items)} items.")
         else:
             super().keyPressEvent(event)
+
+    def export_report(self):
+        if not self.canvas.pixmap_item:
+            self.status_bar.showMessage("No project loaded.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export PDF Report", "", "PDF Files (*.pdf)"
+        )
+        if not file_path:
+            return
+
+        self.status_bar.showMessage("Generating Report...")
+        QApplication.processEvents()
+
+        # Capture Scene
+        # We need to capture the full scene, not just the visible part
+        scene_rect = self.canvas.scene.itemsBoundingRect()
+        # Ensure we capture at least the background image size
+        if self.canvas.pixmap_item:
+            scene_rect = scene_rect.united(self.canvas.pixmap_item.sceneBoundingRect())
+
+        image = QImage(scene_rect.size().toSize(), QImage.Format_ARGB32)
+        image.fill(Qt.white)
+
+        painter = QPainter(image)
+        self.canvas.scene.render(painter, target=QRectF(image.rect()), source=scene_rect)
+        painter.end()
+
+        temp_img_path = "temp_map_capture.png"
+        image.save(temp_img_path)
+
+        # Gather Data
+        aps_list = []
+        for item in self.canvas.scene.items():
+            if isinstance(item, AccessPointItem):
+                aps_list.append({'model': item.model_name})
+
+        # Generate PDF
+        try:
+            project_name = os.path.splitext(os.path.basename(file_path))[0]
+            report = PDFReport(file_path)
+            report.generate_report(
+                project_name=project_name,
+                map_image_path=temp_img_path,
+                access_points=aps_list,
+                min_dbm=self.heatmap_min_dbm,
+                max_dbm=self.heatmap_max_dbm
+            )
+            self.status_bar.showMessage(f"Report exported to {file_path}")
+        except Exception as e:
+            self.status_bar.showMessage(f"Error generating report: {str(e)}")
+        finally:
+            if os.path.exists(temp_img_path):
+                os.remove(temp_img_path)
 
     def on_selection_changed(self):
         # When selection changes, if we have a single item, track its position
