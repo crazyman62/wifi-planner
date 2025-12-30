@@ -902,7 +902,8 @@ class MainWindow(QMainWindow):
 
                         # Check Zones
                         for z_item in zones:
-                            if z_item.mapToScene(z_item.boundingRect()).contains(pos):
+                            poly = z_item.mapToScene(z_item.boundingRect())
+                            if poly.containsPoint(pos, Qt.OddEvenFill):
                                 ap_z_offset = z_item.ceiling_height
                                 break
 
