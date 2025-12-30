@@ -36,11 +36,6 @@ class MainWindow(QMainWindow):
         self.canvas = PlanCanvas()
         main_layout.addWidget(self.canvas, stretch=5)
 
-        # Build UI
-        self._create_menus()
-        self._create_sidebar()
-        self._create_statusbar()
-
         # Application State
         self.current_image_path = None
         self.pixels_per_meter = 1.0 # Default
@@ -51,6 +46,11 @@ class MainWindow(QMainWindow):
 
         self.access_points = [] # List of dicts: {x, y, model: str}
         self.hardware_data = self._load_hardware()
+
+        # Build UI (Needs data loaded first)
+        self._create_menus()
+        self._create_sidebar()
+        self._create_statusbar()
 
         # Temp Drawing State
         self.temp_line_item = None
