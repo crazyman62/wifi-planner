@@ -9,20 +9,11 @@ def generate_heatmap(
     walls,
     hardware_data,
     materials_data,
+    frequency_band="5", # "2.4", "5", or "6"
     resolution=10
 ):
     """
     Generates a heatmap grid for the floor plan.
-
-    :param width: Image width in pixels
-    :param height: Image height in pixels
-    :param ppm: Pixels per meter
-    :param access_points: List of AP dicts
-    :param walls: List of Wall dicts
-    :param hardware_data: Dict of hardware specs
-    :param materials_data: Dict of material specs
-    :param resolution: Grid resolution in pixels (lower = higher res but slower)
-    :return: 2D numpy array of RSSI values (dBm), origin at top-left
     """
 
     # Grid dimensions
@@ -35,19 +26,28 @@ def generate_heatmap(
     if not access_points:
         return heatmap
 
+    # Frequency mapping
+    freq_map = {
+        "2.4": 2400,
+        "5": 5200,
+        "6": 6000
+    }
+    target_freq = freq_map.get(frequency_band, 5200)
+
     # Coordinate grids
     # We want the center of each grid cell
     x_coords = np.linspace(resolution/2, width - resolution/2, grid_w)
     y_coords = np.linspace(resolution/2, height - resolution/2, grid_h)
 
     # Prepare Walls for faster access
-    # Convert list of dicts to list of tuples: ((x1, y1), (x2, y2), loss_5ghz)
+    # Convert list of dicts to list of tuples: ((x1, y1), (x2, y2), loss_db)
     processed_walls = []
     for w in walls:
         mat_name = w['material']
         mat_info = materials_data.get(mat_name, {})
-        # Use 5GHz loss for Phase 1
-        loss = mat_info.get('loss', {}).get('5', 0.0)
+        # Fetch loss for specific band
+        loss_dict = mat_info.get('loss', {})
+        loss = loss_dict.get(frequency_band, loss_dict.get('5', 0.0)) # Fallback to 5 if missing?
         processed_walls.append((w['p1'], w['p2'], loss))
 
     # Calculate for each AP
@@ -57,14 +57,15 @@ def generate_heatmap(
         if not ap_spec:
             continue
 
-        # 5GHz Phase 1
-        band_spec = ap_spec['bands'].get('5')
+        # Fetch specs for specific band
+        band_spec = ap_spec['bands'].get(frequency_band)
         if not band_spec:
+            # This AP does not support the requested band
             continue
 
         tx_power = band_spec['max_tx_power']
         gain = band_spec['gain']
-        freq = 5200 # MHz
+        freq = target_freq # MHz
 
         ap_x, ap_y = ap['x'], ap['y']
 
