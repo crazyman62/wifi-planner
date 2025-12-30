@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QMessageBox
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QMessageBox, QComboBox
 
 class CalibrationDialog(QDialog):
     def __init__(self, pixel_distance, parent=None):
@@ -11,9 +11,13 @@ class CalibrationDialog(QDialog):
         info_label = QLabel(f"Selected Distance: {pixel_distance:.2f} pixels")
         layout.addWidget(info_label)
 
-        layout.addWidget(QLabel("Enter Real-World Distance (meters):"))
-        self.input_meters = QLineEdit()
-        layout.addWidget(self.input_meters)
+        layout.addWidget(QLabel("Enter Real-World Distance:"))
+        self.input_distance = QLineEdit()
+        layout.addWidget(self.input_distance)
+
+        self.combo_units = QComboBox()
+        self.combo_units.addItems(["Meters", "Feet"])
+        layout.addWidget(self.combo_units)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.validate_and_accept)
@@ -22,9 +26,15 @@ class CalibrationDialog(QDialog):
 
     def validate_and_accept(self):
         try:
-            val = float(self.input_meters.text())
+            val = float(self.input_distance.text())
             if val <= 0:
                 raise ValueError
+
+            unit = self.combo_units.currentText()
+            if unit == "Feet":
+                # Convert to Meters
+                val = val * 0.3048
+
             self.real_distance = val
             self.accept()
         except ValueError:
