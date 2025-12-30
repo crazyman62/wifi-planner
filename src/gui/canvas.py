@@ -11,6 +11,7 @@ class PlanCanvas(QGraphicsView):
     # Signals for interactions
     point_clicked = Signal(QPointF)
     mouse_moved = Signal(QPointF)
+    mouse_released = Signal(QPointF) # New signal for drag end
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,27 +48,46 @@ class PlanCanvas(QGraphicsView):
         return True
 
     def wheelEvent(self, event: QWheelEvent):
-        """Handles Zooming with the mouse wheel."""
-        zoom_in_factor = 1.15
-        zoom_out_factor = 1 / zoom_in_factor
+        """
+        Handles Scrolling logic.
+        No Modifier: Zoom
+        Ctrl: Vertical Pan
+        Shift: Horizontal Pan
+        """
+        modifiers = event.modifiers()
 
-        # Save the scene pos
-        old_pos = self.mapToScene(event.position().toPoint())
-
-        # Zoom
-        if event.angleDelta().y() > 0:
-            zoom_factor = zoom_in_factor
+        if modifiers & Qt.ControlModifier:
+            # Vertical Pan
+            delta = event.angleDelta().y()
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta)
+            event.accept()
+        elif modifiers & Qt.ShiftModifier:
+            # Horizontal Pan (Use Y delta as most mice have one wheel)
+            delta = event.angleDelta().y()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta)
+            event.accept()
         else:
-            zoom_factor = zoom_out_factor
+            # Zoom (Default)
+            zoom_in_factor = 1.15
+            zoom_out_factor = 1 / zoom_in_factor
 
-        self.scale(zoom_factor, zoom_factor)
+            # Save the scene pos
+            old_pos = self.mapToScene(event.position().toPoint())
 
-        # Get the new position
-        new_pos = self.mapToScene(event.position().toPoint())
+            # Zoom
+            if event.angleDelta().y() > 0:
+                zoom_factor = zoom_in_factor
+            else:
+                zoom_factor = zoom_out_factor
 
-        # Move scene to old position
-        delta = new_pos - old_pos
-        self.translate(delta.x(), delta.y())
+            self.scale(zoom_factor, zoom_factor)
+
+            # Get the new position
+            new_pos = self.mapToScene(event.position().toPoint())
+
+            # Move scene to old position
+            delta = new_pos - old_pos
+            self.translate(delta.x(), delta.y())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MiddleButton:
@@ -107,5 +127,10 @@ class PlanCanvas(QGraphicsView):
             self._is_panning = False
             self.setCursor(Qt.ArrowCursor)
             event.accept()
+        elif event.button() == Qt.LeftButton:
+            # Emit release signal for move tracking
+            scene_pos = self.mapToScene(event.position().toPoint())
+            self.mouse_released.emit(scene_pos)
+            super().mouseReleaseEvent(event)
         else:
             super().mouseReleaseEvent(event)

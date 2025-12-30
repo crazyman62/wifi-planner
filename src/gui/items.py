@@ -49,7 +49,10 @@ class AccessPointItem(QGraphicsEllipseItem):
                       QGraphicsItem.ItemSendsGeometryChanges)
 
     def itemChange(self, change, value):
-        # We can hook into movement here if needed
+        if change == QGraphicsItem.ItemPositionChange and self.scene():
+            # Notify scene or parent if needed for live updates,
+            # but for Undo/Redo we handle it via mouse release in MainWindow or Canvas.
+            pass
         return super().itemChange(change, value)
 
     def paint(self, painter, option, widget=None):

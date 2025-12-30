@@ -9,10 +9,11 @@ from PySide6.QtCore import Qt, QPointF
 
 from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsPixmapItem
 from src.gui.canvas import PlanCanvas
-from src.gui.dialogs import CalibrationDialog
+from src.gui.dialogs import CalibrationDialog, SettingsDialog
 from src.gui.items import WallItem, AccessPointItem
 from src.engine.heatmap import generate_heatmap, heatmap_to_pixmap
 from src.utils.file_io import save_project, load_project
+from src.utils.command_invoker import UndoStack, AddWallCommand, AddAPCommand, DeleteCommand, MoveCommand
 import math
 import json
 
@@ -42,8 +43,17 @@ class MainWindow(QMainWindow):
         self.pixels_per_meter = 1.0 # Default
         self.current_mode = "SELECT" # SELECT, CALIBRATE, DRAW_WALL, ADD_AP
 
+        # Settings
+        self.heatmap_min_dbm = -85
+        self.heatmap_max_dbm = -30
+        self.snap_threshold = 15
+
         self.materials_data = self._load_materials()
         self.hardware_data = self._load_hardware()
+
+        # Undo Stack
+        self.undo_stack = UndoStack()
+        self.drag_start_pos = None # For AP movement tracking
 
         # Build UI (Needs data loaded first)
         self._create_menus()
@@ -57,6 +67,11 @@ class MainWindow(QMainWindow):
         # Connect Canvas Signals
         self.canvas.point_clicked.connect(self.handle_canvas_click)
         self.canvas.mouse_moved.connect(self.handle_canvas_move)
+        self.canvas.mouse_released.connect(self.handle_canvas_release)
+
+        # For Move Tracking
+        self.selected_item_start_pos = None
+        self.canvas.scene.selectionChanged.connect(self.on_selection_changed)
 
     def _load_materials(self):
         try:
@@ -93,6 +108,13 @@ class MainWindow(QMainWindow):
         open_action = QAction("Open Project", self)
         open_action.triggered.connect(self.open_project)
         file_menu.addAction(open_action)
+
+        # Edit Menu
+        edit_menu = menu_bar.addMenu("&Edit")
+        undo_action = QAction("Undo", self)
+        undo_action.setShortcut("Ctrl+Z")
+        undo_action.triggered.connect(self.undo_last_action)
+        edit_menu.addAction(undo_action)
 
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
@@ -141,33 +163,17 @@ class MainWindow(QMainWindow):
         self.combo_band.setCurrentText("5")
         self.sidebar_layout.addWidget(self.combo_band)
 
-        # Heatmap Settings
-        self.sidebar_layout.addWidget(QLabel("<b>Heatmap Range (dBm)</b>"))
-
-        # Max Signal (Blue)
-        range_layout = QHBoxLayout()
-        range_layout.addWidget(QLabel("High (Blue):"))
-        self.spin_max_dbm = QSpinBox()
-        self.spin_max_dbm.setRange(-100, 0)
-        self.spin_max_dbm.setValue(-30) # Default to -30 based on indoor norms
-        range_layout.addWidget(self.spin_max_dbm)
-        self.sidebar_layout.addLayout(range_layout)
-
-        # Min Signal (Red)
-        range_layout2 = QHBoxLayout()
-        range_layout2.addWidget(QLabel("Low (Red):"))
-        self.spin_min_dbm = QSpinBox()
-        self.spin_min_dbm.setRange(-120, -10)
-        self.spin_min_dbm.setValue(-85) # Default to -85
-        range_layout2.addWidget(self.spin_min_dbm)
-        self.sidebar_layout.addLayout(range_layout2)
-
         # Calculate Button
         self.btn_calculate = QPushButton("Generate Heatmap")
         self.btn_calculate.clicked.connect(self.run_heatmap)
         self.sidebar_layout.addWidget(self.btn_calculate)
 
         self.sidebar_layout.addStretch()
+
+        # Settings Button (at bottom)
+        self.btn_settings = QPushButton("Settings")
+        self.btn_settings.clicked.connect(self.open_settings)
+        self.sidebar_layout.addWidget(self.btn_settings)
 
         # Heatmap Item
         self.heatmap_item = None
@@ -304,16 +310,55 @@ class MainWindow(QMainWindow):
             else:
                 self.status_bar.showMessage("Failed to load project.")
 
+    def undo_last_action(self):
+        if self.undo_stack.undo():
+            self.status_bar.showMessage("Undo successful.")
+        else:
+            self.status_bar.showMessage("Nothing to undo.")
+
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Delete:
             scene = self.canvas.scene
             selected_items = scene.selectedItems()
             if selected_items:
-                for item in selected_items:
-                    scene.removeItem(item)
+                # Use Command
+                cmd = DeleteCommand(scene, selected_items)
+                self.undo_stack.push(cmd)
                 self.status_bar.showMessage(f"Deleted {len(selected_items)} items.")
         else:
             super().keyPressEvent(event)
+
+    def on_selection_changed(self):
+        # When selection changes, if we have a single item, track its position
+        selected = self.canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            self.selected_item_start_pos = selected[0].pos()
+        else:
+            self.selected_item_start_pos = None
+
+    def handle_canvas_release(self, point):
+        # Check if we finished moving an AP
+        selected = self.canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            item = selected[0]
+            if self.selected_item_start_pos is not None:
+                new_pos = item.pos()
+                if new_pos != self.selected_item_start_pos:
+                    # Item moved
+                    cmd = MoveCommand(item, self.selected_item_start_pos, new_pos)
+                    self.undo_stack.push(cmd)
+                    # Update start pos to current
+                    self.selected_item_start_pos = new_pos
+                    self.status_bar.showMessage("AP Moved.")
+
+    def open_settings(self):
+        dialog = SettingsDialog(self.heatmap_min_dbm, self.heatmap_max_dbm, self.snap_threshold, self)
+        if dialog.exec():
+            vals = dialog.get_values()
+            self.heatmap_min_dbm = vals[0]
+            self.heatmap_max_dbm = vals[1]
+            self.snap_threshold = vals[2]
+            self.status_bar.showMessage("Settings saved.")
 
     def run_heatmap(self):
         if not self.canvas.pixmap_item:
@@ -368,12 +413,10 @@ class MainWindow(QMainWindow):
             resolution=20 # Lower res for speed
         )
 
-        # Get Visualization Settings
-        min_dbm = self.spin_min_dbm.value()
-        max_dbm = self.spin_max_dbm.value()
-
         # Convert to Pixmap
-        pixmap = heatmap_to_pixmap(rssi_grid, width, height, min_dbm=min_dbm, max_dbm=max_dbm)
+        pixmap = heatmap_to_pixmap(rssi_grid, width, height,
+                                    min_dbm=self.heatmap_min_dbm,
+                                    max_dbm=self.heatmap_max_dbm)
 
         # Display
         if self.heatmap_item:
@@ -385,12 +428,13 @@ class MainWindow(QMainWindow):
 
         self.status_bar.showMessage("Heatmap generated.")
 
-    def find_snap_point(self, pos, threshold=15):
+    def find_snap_point(self, pos):
         """
         Finds the closest existing wall endpoint to 'pos' from Scene Items.
         """
         closest_point = None
         min_dist = float('inf')
+        threshold = self.snap_threshold
 
         # Collect all endpoints from Scene Items
         endpoints = []
@@ -461,7 +505,10 @@ class MainWindow(QMainWindow):
                     material_name,
                     color_hex
                 )
-                self.canvas.scene.addItem(wall_item)
+
+                # Use Command (Scene addition happens in execute)
+                cmd = AddWallCommand(self.canvas.scene, wall_item)
+                self.undo_stack.push(cmd)
 
                 # Remove temp line
                 if self.temp_line_item:
@@ -475,7 +522,11 @@ class MainWindow(QMainWindow):
         elif self.current_mode == "ADD_AP":
             model_name = self.combo_aps.currentText()
             ap_item = AccessPointItem(point.x(), point.y(), model_name)
-            self.canvas.scene.addItem(ap_item)
+
+            # Use Command
+            cmd = AddAPCommand(self.canvas.scene, ap_item)
+            self.undo_stack.push(cmd)
+
             self.status_bar.showMessage(f"Added AP: {model_name}")
 
     def handle_canvas_move(self, point):

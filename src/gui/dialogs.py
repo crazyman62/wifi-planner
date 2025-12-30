@@ -39,3 +39,42 @@ class CalibrationDialog(QDialog):
             self.accept()
         except ValueError:
             QMessageBox.warning(self, "Invalid Input", "Please enter a valid positive number.")
+
+from PySide6.QtWidgets import QSpinBox, QFormLayout
+
+class SettingsDialog(QDialog):
+    def __init__(self, current_min_dbm, current_max_dbm, current_snap_dist, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.resize(300, 200)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        layout.addWidget(QLabel("<b>Heatmap Visualization (dBm)</b>"))
+        self.spin_max = QSpinBox()
+        self.spin_max.setRange(-100, 0)
+        self.spin_max.setValue(int(current_max_dbm))
+        form.addRow("High Signal (Blue):", self.spin_max)
+
+        self.spin_min = QSpinBox()
+        self.spin_min.setRange(-120, -10)
+        self.spin_min.setValue(int(current_min_dbm))
+        form.addRow("Low Signal (Red):", self.spin_min)
+
+        layout.addSpacing(10)
+        layout.addWidget(QLabel("<b>Editor</b>"))
+        self.spin_snap = QSpinBox()
+        self.spin_snap.setRange(0, 50)
+        self.spin_snap.setValue(int(current_snap_dist))
+        form.addRow("Snapping Distance (px):", self.spin_snap)
+
+        layout.addLayout(form)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def get_values(self):
+        return (self.spin_min.value(), self.spin_max.value(), self.spin_snap.value())
