@@ -151,14 +151,22 @@ class MainWindow(QMainWindow):
         # Heatmap Item
         self.heatmap_item = None
 
+    def reset_drawing_state(self):
+        self.drawing_start_point = None
+        if self.temp_line_item:
+            try:
+                # Check if item is still valid and in a scene
+                if self.temp_line_item.scene():
+                    self.temp_line_item.scene().removeItem(self.temp_line_item)
+            except RuntimeError:
+                # Object already deleted by C++
+                pass
+            self.temp_line_item = None
+
     def set_mode(self, mode):
         self.current_mode = mode
         self.status_bar.showMessage(f"Mode: {mode}")
-        # Reset temp drawing if any
-        self.drawing_start_point = None
-        if self.temp_line_item:
-            self.canvas.scene.removeItem(self.temp_line_item)
-            self.temp_line_item = None
+        self.reset_drawing_state()
 
     def _create_statusbar(self):
         self.status_bar = QStatusBar()
@@ -170,14 +178,13 @@ class MainWindow(QMainWindow):
             self, "Open Floor Plan", "", "Images (*.png *.jpg *.jpeg *.bmp)"
         )
         if file_path:
+            # Reset state before loading new image which clears scene
+            self.reset_drawing_state()
+
             success = self.canvas.load_image(file_path)
             if success:
                 self.current_image_path = file_path
                 self.status_bar.showMessage(f"Loaded: {os.path.basename(file_path)}")
-
-                # Clear existing data - handled by scene.clear() inside load_image usually,
-                # but load_image only clears if pixmap works.
-                # Actually canvas.load_image clears the scene.
 
                 self.pixels_per_meter = 1.0
                 self.heatmap_item = None
@@ -244,6 +251,9 @@ class MainWindow(QMainWindow):
         if file_path:
             data = load_project(file_path)
             if data:
+                # Reset state before loading
+                self.reset_drawing_state()
+
                 # Load Image
                 self.current_image_path = data.get("image_path")
                 if self.current_image_path:
@@ -252,7 +262,6 @@ class MainWindow(QMainWindow):
                 self.pixels_per_meter = data.get("pixels_per_meter", 1.0)
 
                 # Redraw UI elements (Walls)
-                # canvas.load_image clears scene, so we just add items
 
                 # Re-add walls
                 for w in data.get("walls", []):
@@ -449,6 +458,14 @@ class MainWindow(QMainWindow):
             # Snap logic for move
             if self.current_mode == "DRAW_WALL":
                 point = self.find_snap_point(point)
+
+            # Defensive: Check if temp_line_item was deleted externally
+            if self.temp_line_item:
+                try:
+                    # Check validity by accessing a property
+                    _ = self.temp_line_item.scene()
+                except RuntimeError:
+                    self.temp_line_item = None
 
             if not self.temp_line_item:
                 self.temp_line_item = QGraphicsLineItem()
