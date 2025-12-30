@@ -13,7 +13,8 @@ def generate_heatmap(
     resolution=10,
     target_z=0.0,
     floors_config=None,
-    floor_z_map=None
+    floor_z_map=None,
+    origin_offset=(0, 0)
 ):
     """
     Generates a heatmap grid for the floor plan.
@@ -22,6 +23,7 @@ def generate_heatmap(
     :param target_z: The Z-height (absolute) of the floor we are rendering.
     :param floors_config: List of Floor objects (to look up materials).
     :param floor_z_map: Dict mapping floor_index -> absolute Z.
+    :param origin_offset: Tuple (x, y) indicating the top-left coordinate of the grid relative to the scene (0,0).
     """
 
     # Grid dimensions
@@ -43,9 +45,14 @@ def generate_heatmap(
     target_freq = freq_map.get(frequency_band, 5200)
 
     # Coordinate grids
-    # We want the center of each grid cell
-    x_coords = np.linspace(resolution/2, width - resolution/2, grid_w)
-    y_coords = np.linspace(resolution/2, height - resolution/2, grid_h)
+    # We want the center of each grid cell.
+    # The grid starts at origin_offset.
+    # Cell (c, r) center is at origin_offset + (c*res + res/2, r*res + res/2)
+
+    off_x, off_y = origin_offset
+
+    x_coords = np.linspace(off_x + resolution/2, off_x + width - resolution/2, grid_w)
+    y_coords = np.linspace(off_y + resolution/2, off_y + height - resolution/2, grid_h)
 
     # Prepare Walls for faster access (Current Floor Only)
     processed_walls = []

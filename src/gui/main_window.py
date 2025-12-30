@@ -627,6 +627,11 @@ class MainWindow(QMainWindow):
                     item.end_node = None
 
     def handle_canvas_click(self, point):
+        # Handle Right Click logic if needed, but standard Qt events separate Press/Click.
+        # But this method is called by a Signal from PlanCanvas.
+        # We need to update PlanCanvas to distinguish clicks or buttons.
+        # Currently, PlanCanvas only emits point_clicked on LeftButton.
+
         # Delegate to existing logic but using current_canvas
         if self.current_mode == "DRAW_WALL":
             point = self.find_snap_point(point)
@@ -919,8 +924,26 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Generating Heatmap...")
         QApplication.processEvents()
 
-        width = int(self.current_canvas.sceneRect().width())
-        height = int(self.current_canvas.sceneRect().height())
+        # Ensure heatmap_item attribute exists if we init tabs dynamically
+        if not hasattr(self.current_canvas, 'heatmap_item'):
+            self.current_canvas.heatmap_item = None
+
+        # Remove existing heatmap before calculating bounds
+        if self.current_canvas.heatmap_item:
+            if self.current_canvas.heatmap_item.scene() == self.current_canvas.scene:
+                self.current_canvas.scene.removeItem(self.current_canvas.heatmap_item)
+            self.current_canvas.heatmap_item = None
+
+        # Update to use the full scene rect (including moved images)
+        # We use itemsBoundingRect to get the extent of all items (Image, Walls, APs)
+        rect = self.current_canvas.scene.itemsBoundingRect()
+        width = int(rect.width())
+        height = int(rect.height())
+
+        # Also need top-left offset to place the pixmap correctly
+        offset_x = rect.x()
+        offset_y = rect.y()
+
         if width <= 0 or height <= 0: return
 
         rssi_grid = generate_heatmap(
@@ -934,21 +957,19 @@ class MainWindow(QMainWindow):
             resolution=20,
             target_z=target_z,
             floors_config=self.project.floors,
-            floor_z_map=floor_z_map
+            floor_z_map=floor_z_map,
+            origin_offset=(offset_x, offset_y) # Pass origin
         )
 
         pixmap = heatmap_to_pixmap(rssi_grid, width, height,
                                    self.project.heatmap_min_dbm,
                                    self.project.heatmap_max_dbm)
 
-        # Ensure heatmap_item attribute exists if we init tabs dynamically
-        if not hasattr(self.current_canvas, 'heatmap_item'):
-            self.current_canvas.heatmap_item = None
-
-        if self.current_canvas.heatmap_item:
-            self.current_canvas.scene.removeItem(self.current_canvas.heatmap_item)
-
         self.current_canvas.heatmap_item = QGraphicsPixmapItem(pixmap)
+
+        # Position heatmap correctly at the top-left of the bounding rect
+        self.current_canvas.heatmap_item.setPos(offset_x, offset_y)
+
         self.current_canvas.heatmap_item.setZValue(10)
         self.current_canvas.scene.addItem(self.current_canvas.heatmap_item)
         self.status_bar.showMessage("Heatmap generated.")
