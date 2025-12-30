@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QWheelEvent
 from PySide6.QtCore import Qt, Signal, QPointF
 
@@ -28,24 +28,81 @@ class PlanCanvas(QGraphicsView):
         self._pan_start = QPointF(0, 0)
 
         self.pixmap_item = None
+        self.ghost_pixmap_item = None
 
         # Calibration state
         self.temp_line = None
         self.start_point = None
         self.is_drawing_line = False
 
-    def load_image(self, image_path):
-        """Loads a floor plan image onto the scene."""
+    def load_image(self, image_path, x_offset=0, y_offset=0, rotation=0, scale_factor=1.0):
+        """
+        Loads a floor plan image onto the scene.
+        """
         pixmap = QPixmap(image_path)
         if pixmap.isNull():
             return False
 
-        self.scene.clear()
+        if self.pixmap_item in self.scene.items():
+            self.scene.removeItem(self.pixmap_item)
+
         self.pixmap_item = QGraphicsPixmapItem(pixmap)
+
+        # Apply Transforms
+        # Scale (Image resolution scaling, distinct from View Zoom or Physics Scale)
+        self.pixmap_item.setScale(scale_factor)
+
+        # Center of rotation should be center of image or top-left?
+        # Usually rotation around center is more intuitive for alignment,
+        # but top-left is standard. Let's start with standard.
+        # To rotate around center, we need to translate origin.
+
+        # Rotation
+        self.pixmap_item.setRotation(rotation)
+
+        # Position (Offset)
+        self.pixmap_item.setPos(x_offset, y_offset)
+
+        # Ensure Background is at bottom
+        self.pixmap_item.setZValue(-100)
+
         self.scene.addItem(self.pixmap_item)
-        self.setSceneRect(self.pixmap_item.boundingRect())
-        self.fitInView(self.pixmap_item, Qt.KeepAspectRatio)
+
+        # Set scene rect to include the image
+        self.setSceneRect(self.pixmap_item.sceneBoundingRect())
         return True
+
+    def set_ghost_image(self, image_path, x_offset=0, y_offset=0, rotation=0, scale_factor=1.0):
+        """
+        Sets a semi-transparent 'ghost' image of another floor (e.g. floor below).
+        """
+        if self.ghost_pixmap_item:
+            self.scene.removeItem(self.ghost_pixmap_item)
+            self.ghost_pixmap_item = None
+
+        if not image_path:
+            return
+
+        pixmap = QPixmap(image_path)
+        if pixmap.isNull():
+            return
+
+        self.ghost_pixmap_item = QGraphicsPixmapItem(pixmap)
+        self.ghost_pixmap_item.setOpacity(0.3)
+        self.ghost_pixmap_item.setScale(scale_factor)
+        self.ghost_pixmap_item.setRotation(rotation)
+        self.ghost_pixmap_item.setPos(x_offset, y_offset)
+        self.ghost_pixmap_item.setZValue(-101) # Below the current floor map
+
+        self.scene.addItem(self.ghost_pixmap_item)
+
+    def update_image_transform(self, x, y, rotation, scale):
+        if self.pixmap_item:
+            self.pixmap_item.setPos(x, y)
+            self.pixmap_item.setRotation(rotation)
+            self.pixmap_item.setScale(scale)
+            # Update Scene Rect if needed, or let it grow
+            # self.setSceneRect(self.pixmap_item.sceneBoundingRect())
 
     def wheelEvent(self, event: QWheelEvent):
         """
@@ -98,12 +155,6 @@ class PlanCanvas(QGraphicsView):
         elif event.button() == Qt.LeftButton:
             scene_pos = self.mapToScene(event.position().toPoint())
             self.point_clicked.emit(scene_pos)
-
-            # Handle Drawing logic (if controlled by parent)
-            # But here we might want to just emit the click and let parent decide,
-            # OR handle temp line drawing here if we set a mode.
-            # For now, let's keep it simple: Parent handles logic via signals or we expose a method.
-
             super().mousePressEvent(event)
         else:
             super().mousePressEvent(event)

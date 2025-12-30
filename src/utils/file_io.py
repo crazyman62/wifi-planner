@@ -1,39 +1,28 @@
 import json
 import os
+from src.engine.project import Project
 
-def save_project(filepath, image_path, ppm, walls, access_points,
-                 snap_dist=15, heatmap_min=-85, heatmap_max=-30,
-                 metadata=None):
+def save_project(file_path, project_obj):
     """
-    Saves the project state to a JSON file.
+    Saves the Project object to a JSON file.
     """
-    if metadata is None:
-        metadata = {}
+    data = project_obj.to_dict()
+    try:
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=4)
+        return True
+    except Exception as e:
+        print(f"Error saving project: {e}")
+        return False
 
-    data = {
-        "metadata": metadata,
-        "image_path": image_path,
-        "pixels_per_meter": ppm,
-        "walls": walls,
-        "access_points": access_points,
-        "settings": {
-            "snap_distance": snap_dist,
-            "heatmap_min_dbm": heatmap_min,
-            "heatmap_max_dbm": heatmap_max
-        }
-    }
-
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=4)
-
-def load_project(filepath):
+def load_project(file_path):
     """
-    Loads the project state from a JSON file.
+    Loads a Project object from a JSON file.
     """
-    if not os.path.exists(filepath):
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+            return Project.from_dict(data)
+    except Exception as e:
+        print(f"Error loading project: {e}")
         return None
-
-    with open(filepath, 'r') as f:
-        data = json.load(f)
-
-    return data

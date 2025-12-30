@@ -1,95 +1,100 @@
 import sys
 import json
 import os
+import math
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
-                               QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox, QInputDialog)
-from PySide6.QtGui import QAction, QIcon, QPen, QColor
-from PySide6.QtCore import Qt, QPointF
+                               QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox,
+                               QInputDialog, QTabWidget, QDoubleSpinBox)
+from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter
+from PySide6.QtCore import Qt, QPointF, QRectF
 
-from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsPixmapItem
+from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsPixmapItem, QGraphicsRectItem
 from src.gui.canvas import PlanCanvas
-from src.gui.dialogs import CalibrationDialog, SettingsDialog
-from src.gui.items import WallItem, AccessPointItem
+from src.gui.dialogs import CalibrationDialog, SettingsDialog, AddFloorDialog
+from src.gui.items import WallItem, AccessPointItem, WallNodeItem, ZoneItem
 from src.engine.heatmap import generate_heatmap, heatmap_to_pixmap
+from src.engine.project import Project, Floor
 from src.utils.file_io import save_project, load_project
 from src.utils.command_invoker import UndoStack, AddWallCommand, AddAPCommand, DeleteCommand, MoveCommand
 from src.utils.report_generator import PDFReport
-from PySide6.QtCore import QRectF
-from PySide6.QtGui import QPainter, QImage
-import math
-import json
-import os
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("WiFi Predictive Planner - Phase 1")
+        self.setWindowTitle("WiFi Predictive Planner - Phase 2")
         self.resize(1200, 800)
 
-        # Project Metadata
-        self.project_name = "New Project"
-        self.floor_name = "Floor 1"
-        self.ap_counter = 1
+        # Initialize Project
+        self.project = Project()
 
-        # Central Widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # Central Widget is now a TabWidget
+        self.tabs = QTabWidget()
+        self.tabs.setTabsClosable(False)
+        self.tabs.currentChanged.connect(self.on_tab_changed)
 
-        # Layouts
-        main_layout = QHBoxLayout(central_widget)
+        # Tools Sidebar
+        sidebar_widget = QWidget()
+        self.sidebar_layout = QVBoxLayout(sidebar_widget)
 
-        # Sidebar (Tools)
-        self.sidebar_layout = QVBoxLayout()
-        main_layout.addLayout(self.sidebar_layout, stretch=1)
+        container = QWidget()
+        main_layout = QHBoxLayout(container)
+        main_layout.addWidget(sidebar_widget, stretch=1)
+        main_layout.addWidget(self.tabs, stretch=5)
+        self.setCentralWidget(container)
 
-        # Canvas Area
-        self.canvas = PlanCanvas()
-        main_layout.addWidget(self.canvas, stretch=5)
+        # State
+        self.current_mode = "SELECT"
+        self.undo_stack = UndoStack()
+        self.active_wall_nodes = [] # List of WallNodeItems
 
-        # Application State
-        self.current_image_path = None
-        self.pixels_per_meter = 1.0 # Default
-        self.current_mode = "SELECT" # SELECT, CALIBRATE, DRAW_WALL, ADD_AP
-
-        # Settings
-        self.heatmap_min_dbm = -85
-        self.heatmap_max_dbm = -30
-        self.snap_threshold = 15
-
+        # Materials & Hardware
         self.materials_data = self._load_materials()
+        self.floor_materials_data = self.materials_data.get('floor_materials', [])
+        if isinstance(self.floor_materials_data, list):
+             self.floor_material_names = [m['name'] for m in self.floor_materials_data]
+        else:
+            self.floor_material_names = ["Concrete", "Wood"]
+
         self.hardware_data = self._load_hardware()
 
-        # Undo Stack
-        self.undo_stack = UndoStack()
-        self.drag_start_pos = None # For AP movement tracking
-
-        # Build UI (Needs data loaded first)
+        # Build UI
         self._create_menus()
         self._create_sidebar()
         self._create_statusbar()
 
-        # Temp Drawing State
-        self.temp_line_item = None
+        # Canvas Event Handling State
         self.drawing_start_point = None
-
-        # Connect Canvas Signals
-        self.canvas.point_clicked.connect(self.handle_canvas_click)
-        self.canvas.mouse_moved.connect(self.handle_canvas_move)
-        self.canvas.mouse_released.connect(self.handle_canvas_release)
-
-        # For Move Tracking
+        self.temp_line_item = None
+        self.temp_rect_item = None
         self.selected_item_start_pos = None
-        self.canvas.scene.selectionChanged.connect(self.on_selection_changed)
+
+        # Add initial floor
+        f1 = Floor("Floor 1", 1, "Concrete")
+        self.project.add_floor(f1)
+        self._add_tab_for_floor(f1)
+
+    @property
+    def current_canvas(self):
+        """Returns the PlanCanvas of the currently active tab."""
+        widget = self.tabs.currentWidget()
+        if isinstance(widget, PlanCanvas):
+            return widget
+        return None
+
+    @property
+    def current_floor(self):
+        index = self.tabs.currentIndex()
+        return self.project.get_floor(index)
 
     def _load_materials(self):
         try:
             with open('src/data/materials.json', 'r') as f:
                 data = json.load(f)
-                return {m['name']: m for m in data['materials']}
+                return data
         except Exception as e:
             print(f"Error loading materials: {e}")
-            return {}
+            return {'materials': [], 'floor_materials': []}
 
     def _load_hardware(self):
         try:
@@ -106,9 +111,9 @@ class MainWindow(QMainWindow):
         # File Menu
         file_menu = menu_bar.addMenu("&File")
 
-        load_img_action = QAction("Load Image", self)
-        load_img_action.triggered.connect(self.load_image)
-        file_menu.addAction(load_img_action)
+        new_floor_action = QAction("Add Floor", self)
+        new_floor_action.triggered.connect(self.show_add_floor_dialog)
+        file_menu.addAction(new_floor_action)
 
         save_action = QAction("Save Project", self)
         save_action.triggered.connect(self.save_project)
@@ -118,6 +123,10 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self.open_project)
         file_menu.addAction(open_action)
 
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
         # Edit Menu
         edit_menu = menu_bar.addMenu("&Edit")
         undo_action = QAction("Undo", self)
@@ -125,49 +134,86 @@ class MainWindow(QMainWindow):
         undo_action.triggered.connect(self.undo_last_action)
         edit_menu.addAction(undo_action)
 
-        # Project Menu
-        project_menu = menu_bar.addMenu("&Project")
-        props_action = QAction("Properties", self)
-        props_action.triggered.connect(self.edit_properties)
-        project_menu.addAction(props_action)
-
-        # Report Menu
-        report_menu = menu_bar.addMenu("&Report")
-        export_pdf_action = QAction("Export PDF Report", self)
-        export_pdf_action.triggered.connect(self.export_report)
-        report_menu.addAction(export_pdf_action)
-
-        exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-
     def _create_sidebar(self):
-        # Mode Buttons
+        # Floor Controls
+        self.sidebar_layout.addWidget(QLabel("<b>Floor Tools</b>"))
+        self.btn_add_floor = QPushButton("Add Floor")
+        self.btn_add_floor.clicked.connect(self.show_add_floor_dialog)
+        self.sidebar_layout.addWidget(self.btn_add_floor)
+
+        self.sidebar_layout.addSpacing(10)
+
+        # Drawing Tools
+        self.sidebar_layout.addWidget(QLabel("<b>Drawing Tools</b>"))
         self.btn_select = QPushButton("Select / Pan")
         self.btn_calibrate = QPushButton("Calibrate Scale")
         self.btn_draw_wall = QPushButton("Draw Wall")
+        self.btn_edit_nodes = QPushButton("Edit Wall Nodes") # New
+        self.btn_draw_zone = QPushButton("Draw Ceiling Zone") # New
         self.btn_add_ap = QPushButton("Add AP")
 
-        # Connect buttons
         self.btn_select.clicked.connect(lambda: self.set_mode("SELECT"))
         self.btn_calibrate.clicked.connect(lambda: self.set_mode("CALIBRATE"))
         self.btn_draw_wall.clicked.connect(lambda: self.set_mode("DRAW_WALL"))
+        self.btn_edit_nodes.clicked.connect(lambda: self.set_mode("EDIT_NODES"))
+        self.btn_draw_zone.clicked.connect(lambda: self.set_mode("DRAW_ZONE"))
         self.btn_add_ap.clicked.connect(lambda: self.set_mode("ADD_AP"))
 
-        self.sidebar_layout.addWidget(QLabel("<b>Tools</b>"))
         self.sidebar_layout.addWidget(self.btn_select)
         self.sidebar_layout.addWidget(self.btn_calibrate)
         self.sidebar_layout.addWidget(self.btn_draw_wall)
+        self.sidebar_layout.addWidget(self.btn_edit_nodes)
+        self.sidebar_layout.addWidget(self.btn_draw_zone)
         self.sidebar_layout.addWidget(self.btn_add_ap)
 
         self.lbl_ppm = QLabel("Scale: Not Calibrated")
         self.sidebar_layout.addWidget(self.lbl_ppm)
 
-        # Wall Materials Config
+        # Alignment Tools
+        self.sidebar_layout.addSpacing(10)
+        self.sidebar_layout.addWidget(QLabel("<b>Floor Alignment</b>"))
+
+        align_layout = QVBoxLayout()
+        self.spin_x = QDoubleSpinBox()
+        self.spin_x.setRange(-5000, 5000)
+        self.spin_x.setPrefix("X: ")
+        self.spin_x.valueChanged.connect(self.update_floor_transform)
+        align_layout.addWidget(self.spin_x)
+
+        self.spin_y = QDoubleSpinBox()
+        self.spin_y.setRange(-5000, 5000)
+        self.spin_y.setPrefix("Y: ")
+        self.spin_y.valueChanged.connect(self.update_floor_transform)
+        align_layout.addWidget(self.spin_y)
+
+        self.spin_rot = QDoubleSpinBox()
+        self.spin_rot.setRange(-360, 360)
+        self.spin_rot.setPrefix("Rot: ")
+        self.spin_rot.valueChanged.connect(self.update_floor_transform)
+        align_layout.addWidget(self.spin_rot)
+
+        self.spin_scale = QDoubleSpinBox()
+        self.spin_scale.setRange(0.01, 100.0)
+        self.spin_scale.setSingleStep(0.1)
+        self.spin_scale.setValue(1.0)
+        self.spin_scale.setPrefix("Scale: ")
+        self.spin_scale.valueChanged.connect(self.update_floor_transform)
+        align_layout.addWidget(self.spin_scale)
+
+        self.chk_ghost = QPushButton("Toggle Ghost Floor")
+        self.chk_ghost.setCheckable(True)
+        self.chk_ghost.clicked.connect(self.toggle_ghost_floor)
+        align_layout.addWidget(self.chk_ghost)
+
+        self.sidebar_layout.addLayout(align_layout)
+
+        # Wall Material
+        self.sidebar_layout.addSpacing(10)
         self.sidebar_layout.addWidget(QLabel("<b>Wall Material</b>"))
         self.combo_materials = QComboBox()
-        if self.materials_data:
-            self.combo_materials.addItems(list(self.materials_data.keys()))
+        # Parse material names from complex structure
+        wall_mats = self.materials_data.get('materials', [])
+        self.combo_materials.addItems([m['name'] for m in wall_mats])
         self.sidebar_layout.addWidget(self.combo_materials)
 
         # AP Selection
@@ -184,511 +230,614 @@ class MainWindow(QMainWindow):
         self.combo_band.setCurrentText("5")
         self.sidebar_layout.addWidget(self.combo_band)
 
-        # Auto-Heatmap note (Button removed)
-        self.sidebar_layout.addWidget(QLabel("<i>Heatmap updates automatically</i>"))
-
         self.sidebar_layout.addStretch()
 
-        # Settings Button (at bottom)
+        # Settings
         self.btn_settings = QPushButton("Settings")
         self.btn_settings.clicked.connect(self.open_settings)
         self.sidebar_layout.addWidget(self.btn_settings)
-
-        # Heatmap Item
-        self.heatmap_item = None
-
-    def reset_drawing_state(self):
-        self.drawing_start_point = None
-        if self.temp_line_item:
-            try:
-                # Check if item is still valid and in a scene
-                if self.temp_line_item.scene():
-                    self.temp_line_item.scene().removeItem(self.temp_line_item)
-            except RuntimeError:
-                # Object already deleted by C++
-                pass
-            self.temp_line_item = None
-
-    def set_mode(self, mode):
-        self.current_mode = mode
-        self.status_bar.showMessage(f"Mode: {mode}")
-        self.reset_drawing_state()
 
     def _create_statusbar(self):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")
 
-    def load_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Floor Plan", "", "Images (*.png *.jpg *.jpeg *.bmp)"
-        )
-        if file_path:
-            # Reset state before loading new image which clears scene
-            self.reset_drawing_state()
+    # --- Floor Management ---
 
-            success = self.canvas.load_image(file_path)
-            if success:
-                self.current_image_path = file_path
-                self.status_bar.showMessage(f"Loaded: {os.path.basename(file_path)}")
-
-                self.pixels_per_meter = 1.0
-                self.heatmap_item = None
-            else:
-                self.status_bar.showMessage("Failed to load image.")
-
-    def save_project(self):
-        if not self.current_image_path:
-            self.status_bar.showMessage("Nothing to save.")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Project", "", "WiFi Project (*.wifi)"
-        )
-
-        # Gather data from Scene Items
-        walls_to_save = []
-        aps_to_save = []
-
-        for item in self.canvas.scene.items():
-            if isinstance(item, WallItem):
-                line = item.line()
-                p1 = (line.x1(), line.y1())
-                p2 = (line.x2(), line.y2())
-                walls_to_save.append({
-                    'p1': p1,
-                    'p2': p2,
-                    'material': item.material_name
-                })
-            elif isinstance(item, AccessPointItem):
-                center_local = item.rect().center()
-                center_scene = item.mapToScene(center_local)
-                aps_to_save.append({
-                    'x': center_scene.x(),
-                    'y': center_scene.y(),
-                    'model': item.model_name,
-                    'name': item.name
-                })
-
-        if file_path:
-            # Pack metadata into a dict to pass if I update file_io
-            meta = {
-                'project_name': self.project_name,
-                'floor_name': self.floor_name,
-                'next_ap_id': self.ap_counter
-            }
-
-            save_project(file_path, self.current_image_path, self.pixels_per_meter,
-                         walls_to_save, aps_to_save,
-                         self.snap_threshold, self.heatmap_min_dbm, self.heatmap_max_dbm,
-                         metadata=meta)
-            self.status_bar.showMessage(f"Saved to {file_path}")
-
-    def open_project(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Project", "", "WiFi Project (*.wifi)"
-        )
-        if file_path:
-            data = load_project(file_path)
-            if data:
-                # Reset state before loading
-                self.reset_drawing_state()
-
-                # Load Image
-                self.current_image_path = data.get("image_path")
-                if self.current_image_path:
-                    self.canvas.load_image(self.current_image_path)
-
-                self.pixels_per_meter = data.get("pixels_per_meter", 1.0)
-
-                # Load Settings
-                settings = data.get("settings", {})
-                self.snap_threshold = settings.get("snap_distance", 15)
-                self.heatmap_min_dbm = settings.get("heatmap_min_dbm", -85)
-                self.heatmap_max_dbm = settings.get("heatmap_max_dbm", -30)
-
-                # Load Metadata
-                meta = data.get("metadata", {})
-                self.project_name = meta.get("project_name", "New Project")
-                self.floor_name = meta.get("floor_name", "Floor 1")
-                self.ap_counter = meta.get("next_ap_id", 1)
-
-                # Redraw UI elements (Walls)
-
-                # Re-add walls
-                for w in data.get("walls", []):
-                    p1 = w['p1']
-                    p2 = w['p2']
-                    mat = w['material']
-                    color_hex = self.materials_data.get(mat, {}).get('color', '#000000')
-
-                    wall_item = WallItem((p1[0], p1[1]), (p2[0], p2[1]), mat, color_hex)
-                    self.canvas.scene.addItem(wall_item)
-
-                # Re-add APs
-                for ap in data.get("access_points", []):
-                    name = ap.get('name', 'AP')
-                    ap_item = AccessPointItem(ap['x'], ap['y'], ap['model'], name)
-                    self.canvas.scene.addItem(ap_item)
-
-                # Trigger heatmap
-                self.trigger_heatmap()
-
-                self.lbl_ppm.setText(f"Scale: {self.pixels_per_meter:.2f} px/m")
-                self.status_bar.showMessage(f"Project loaded: {os.path.basename(file_path)}")
-            else:
-                self.status_bar.showMessage("Failed to load project.")
-
-    def undo_last_action(self):
-        if self.undo_stack.undo():
-            self.status_bar.showMessage("Undo successful.")
-            self.trigger_heatmap()
-        else:
-            self.status_bar.showMessage("Nothing to undo.")
-
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Delete:
-            scene = self.canvas.scene
-            selected_items = scene.selectedItems()
-            if selected_items:
-                # Use Command
-                cmd = DeleteCommand(scene, selected_items)
-                self.undo_stack.push(cmd)
-                self.status_bar.showMessage(f"Deleted {len(selected_items)} items.")
-                self.trigger_heatmap()
-        else:
-            super().keyPressEvent(event)
-
-    def export_report(self):
-        if not self.canvas.pixmap_item:
-            self.status_bar.showMessage("No project loaded.")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export PDF Report", "", "PDF Files (*.pdf)"
-        )
-        if not file_path:
-            return
-
-        self.status_bar.showMessage("Generating Report...")
-        QApplication.processEvents()
-
-        # Ensure heatmap is up to date
-        self.trigger_heatmap()
-        QApplication.processEvents() # Render updates
-
-        # Capture Scene
-        # We need to capture the full scene, not just the visible part
-        scene_rect = self.canvas.scene.itemsBoundingRect()
-        # Ensure we capture at least the background image size
-        if self.canvas.pixmap_item:
-            scene_rect = scene_rect.united(self.canvas.pixmap_item.sceneBoundingRect())
-
-        image = QImage(scene_rect.size().toSize(), QImage.Format_ARGB32)
-        image.fill(Qt.white)
-
-        painter = QPainter(image)
-        self.canvas.scene.render(painter, target=QRectF(image.rect()), source=scene_rect)
-        painter.end()
-
-        temp_img_path = "temp_map_capture.png"
-        image.save(temp_img_path)
-
-        # Gather Data
-        aps_list = []
-        for item in self.canvas.scene.items():
-            if isinstance(item, AccessPointItem):
-                aps_list.append({'model': item.model_name, 'name': item.name})
-
-        # Generate PDF
-        try:
-            report = PDFReport(file_path)
-            report.generate_report(
-                project_name=self.project_name,
-                floor_name=self.floor_name,
-                map_image_path=temp_img_path,
-                access_points=aps_list,
-                min_dbm=self.heatmap_min_dbm,
-                max_dbm=self.heatmap_max_dbm
-            )
-            self.status_bar.showMessage(f"Report exported to {file_path}")
-        except Exception as e:
-            self.status_bar.showMessage(f"Error generating report: {str(e)}")
-        finally:
-            if os.path.exists(temp_img_path):
-                os.remove(temp_img_path)
-
-    def on_selection_changed(self):
-        # When selection changes, if we have a single item, track its position
-        selected = self.canvas.scene.selectedItems()
-        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
-            self.selected_item_start_pos = selected[0].pos()
-        else:
-            self.selected_item_start_pos = None
-
-    def handle_canvas_release(self, point):
-        # Check if we finished moving an AP
-        selected = self.canvas.scene.selectedItems()
-        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
-            item = selected[0]
-            if self.selected_item_start_pos is not None:
-                new_pos = item.pos()
-                if new_pos != self.selected_item_start_pos:
-                    # Item moved
-                    cmd = MoveCommand(item, self.selected_item_start_pos, new_pos)
-                    self.undo_stack.push(cmd)
-                    # Update start pos to current
-                    self.selected_item_start_pos = new_pos
-                    self.status_bar.showMessage("AP Moved.")
-                    self.trigger_heatmap()
-
-    def open_settings(self):
-        dialog = SettingsDialog(self.heatmap_min_dbm, self.heatmap_max_dbm, self.snap_threshold, self)
+    def show_add_floor_dialog(self):
+        dialog = AddFloorDialog(self.floor_material_names, self)
         if dialog.exec():
-            vals = dialog.get_values()
-            self.heatmap_min_dbm = vals[0]
-            self.heatmap_max_dbm = vals[1]
-            self.snap_threshold = vals[2]
-            self.status_bar.showMessage("Settings saved.")
+            data = dialog.get_data()
+            new_floor = Floor(
+                name=data['name'],
+                number=data['number'],
+                material_name=data['material'],
+                image_path=data['image_path']
+            )
+            new_floor.ceiling_height = data['ceiling_height']
 
-    def trigger_heatmap(self):
-        # Wrapper for auto-update
-        self.run_heatmap(auto=True)
+            self.project.add_floor(new_floor)
+            self._add_tab_for_floor(new_floor)
 
-    def run_heatmap(self, auto=False):
-        if not self.canvas.pixmap_item:
-            if not auto: self.status_bar.showMessage("No image loaded.")
-            return
+            self.status_bar.showMessage(f"Added floor: {new_floor.name}")
 
-        if self.pixels_per_meter <= 0:
-            if not auto: self.status_bar.showMessage("Please calibrate first.")
-            return
+    def _add_tab_for_floor(self, floor):
+        canvas = PlanCanvas()
 
-        # Gather data from Scene
-        current_walls = []
-        current_aps = []
-        for item in self.canvas.scene.items():
-            if isinstance(item, WallItem):
-                line = item.line()
-                current_walls.append({
-                    'p1': (line.x1(), line.y1()),
-                    'p2': (line.x2(), line.y2()),
-                    'material': item.material_name
-                })
-            elif isinstance(item, AccessPointItem):
-                center_local = item.rect().center()
-                center_scene = item.mapToScene(center_local)
-                current_aps.append({
-                    'x': center_scene.x(),
-                    'y': center_scene.y(),
-                    'model': item.model_name
-                })
+        # Connect signals
+        canvas.point_clicked.connect(self.handle_canvas_click)
+        canvas.mouse_moved.connect(self.handle_canvas_move)
+        canvas.mouse_released.connect(self.handle_canvas_release)
+        canvas.scene.selectionChanged.connect(self.on_selection_changed)
 
-        if not current_aps:
-            if not auto: self.status_bar.showMessage("Place at least one AP.")
-            # Clear heatmap if no APs
-            if self.heatmap_item:
-                self.canvas.scene.removeItem(self.heatmap_item)
-                self.heatmap_item = None
-            return
+        # Load Image
+        if floor.image_path:
+            canvas.load_image(floor.image_path,
+                              floor.x_offset, floor.y_offset,
+                              floor.rotation, floor.scale_factor)
 
-        self.status_bar.showMessage("Generating Heatmap...")
-        QApplication.processEvents() # Force UI update
+        # Re-populate items (if loading from file)
+        self._populate_canvas_items(canvas, floor)
 
-        width = int(self.canvas.pixmap_item.pixmap().width())
-        height = int(self.canvas.pixmap_item.pixmap().height())
+        self.tabs.addTab(canvas, floor.name)
+        self.tabs.setCurrentWidget(canvas)
 
-        band = self.combo_band.currentText()
+    def _populate_canvas_items(self, canvas, floor):
+        # Walls
+        wall_mats = {m['name']: m for m in self.materials_data.get('materials', [])}
+        for w in floor.walls:
+            # Helper to normalize access
+            def get_val(item, key, default):
+                return item.get(key, default) if isinstance(item, dict) else getattr(item, key, default)
 
-        # Run Calculation
-        rssi_grid = generate_heatmap(
-            width, height,
-            self.pixels_per_meter,
-            current_aps,
-            current_walls,
-            self.hardware_data,
-            self.materials_data,
-            frequency_band=band,
-            resolution=20 # Lower res for speed
-        )
+            p1 = get_val(w, 'p1', (0,0))
+            p2 = get_val(w, 'p2', (0,0))
+            mat = get_val(w, 'material', 'Concrete')
 
-        # Convert to Pixmap
-        pixmap = heatmap_to_pixmap(rssi_grid, width, height,
-                                    min_dbm=self.heatmap_min_dbm,
-                                    max_dbm=self.heatmap_max_dbm)
+            color_hex = wall_mats.get(mat, {}).get('color', '#000000')
+            wall_item = WallItem((p1[0], p1[1]), (p2[0], p2[1]), mat, color_hex)
+            canvas.scene.addItem(wall_item)
 
-        # Display
-        if self.heatmap_item:
-            self.canvas.scene.removeItem(self.heatmap_item)
+        # APs
+        for ap in floor.access_points:
+            x = ap['x'] if isinstance(ap, dict) else ap.x
+            y = ap['y'] if isinstance(ap, dict) else ap.y
+            model = ap['model'] if isinstance(ap, dict) else ap.model
+            name = ap['name'] if isinstance(ap, dict) else ap.name
 
-        self.heatmap_item = QGraphicsPixmapItem(pixmap)
-        self.heatmap_item.setZValue(10) # Above map, below APs/Walls if we set their Z higher
-        self.canvas.scene.addItem(self.heatmap_item)
+            ap_item = AccessPointItem(x, y, model, name)
+            canvas.scene.addItem(ap_item)
 
-        self.status_bar.showMessage("Heatmap generated.")
+        # Zones
+        for z in floor.regions:
+            # z is dict from JSON
+            x, y, w, h = z.get('rect', [0,0,10,10])
+            height = z.get('height', 3.0)
 
-    def edit_properties(self):
-        p_name, ok1 = QInputDialog.getText(self, "Project Properties", "Project Name:", text=self.project_name)
-        if ok1:
-            f_name, ok2 = QInputDialog.getText(self, "Project Properties", "Floor Name:", text=self.floor_name)
-            if ok2:
-                self.project_name = p_name
-                self.floor_name = f_name
-                self.setWindowTitle(f"WiFi Planner - {self.project_name} - {self.floor_name}")
+            zone_item = ZoneItem(QRectF(x, y, w, h), height)
+            canvas.scene.addItem(zone_item)
 
-    def find_snap_point(self, pos):
+    def on_tab_changed(self, index):
+        floor = self.project.get_floor(index)
+        if floor:
+            # Update UI controls for this floor
+            self.blockSignals(True) # Prevent feedback loops
+            self.spin_x.setValue(floor.x_offset)
+            self.spin_y.setValue(floor.y_offset)
+            self.spin_rot.setValue(floor.rotation)
+            self.spin_scale.setValue(floor.scale_factor)
+
+            if floor.pixels_per_meter:
+                self.lbl_ppm.setText(f"Scale: {floor.pixels_per_meter:.2f} px/m")
+            else:
+                self.lbl_ppm.setText("Scale: Not Calibrated")
+
+            self.blockSignals(False)
+
+            # If Ghost Mode is on, update it
+            if self.chk_ghost.isChecked():
+                self.update_ghost_view(index)
+
+    def update_floor_transform(self):
+        floor = self.current_floor
+        canvas = self.current_canvas
+        if floor and canvas:
+            floor.x_offset = self.spin_x.value()
+            floor.y_offset = self.spin_y.value()
+            floor.rotation = self.spin_rot.value()
+            floor.scale_factor = self.spin_scale.value()
+
+            canvas.update_image_transform(floor.x_offset, floor.y_offset, floor.rotation, floor.scale_factor)
+
+            # Trigger Heatmap Update? Maybe too heavy.
+            pass
+
+    def toggle_ghost_floor(self):
+        idx = self.tabs.currentIndex()
+        if self.chk_ghost.isChecked():
+            self.update_ghost_view(idx)
+        else:
+            if self.current_canvas:
+                self.current_canvas.set_ghost_image(None)
+
+    def update_ghost_view(self, current_idx):
+        if current_idx > 0:
+            target_idx = current_idx - 1
+            target_floor = self.project.get_floor(target_idx)
+            if target_floor and target_floor.image_path:
+                self.current_canvas.set_ghost_image(
+                    target_floor.image_path,
+                    target_floor.x_offset,
+                    target_floor.y_offset,
+                    target_floor.rotation,
+                    target_floor.scale_factor
+                )
+        else:
+            self.status_bar.showMessage("No floor below to display.")
+            self.current_canvas.set_ghost_image(None)
+
+    # --- Mode & Canvas Interaction ---
+
+    def set_mode(self, mode):
+        # Exit previous mode logic
+        if self.current_mode == "EDIT_NODES" and mode != "EDIT_NODES":
+            self.clear_wall_nodes()
+
+        self.current_mode = mode
+        self.status_bar.showMessage(f"Mode: {mode}")
+        self.reset_drawing_state()
+
+        if mode == "EDIT_NODES":
+            self.spawn_wall_nodes()
+
+    def reset_drawing_state(self):
+        self.drawing_start_point = None
+        if self.temp_line_item:
+            try:
+                if self.temp_line_item.scene():
+                    self.temp_line_item.scene().removeItem(self.temp_line_item)
+            except RuntimeError:
+                pass
+            self.temp_line_item = None
+
+        if self.temp_rect_item:
+            try:
+                if self.temp_rect_item.scene():
+                    self.temp_rect_item.scene().removeItem(self.temp_rect_item)
+            except RuntimeError:
+                pass
+            self.temp_rect_item = None
+
+    def spawn_wall_nodes(self):
         """
-        Finds the closest existing wall endpoint to 'pos' from Scene Items.
+        Creates WallNodeItems at every unique wall endpoint in the scene.
         """
-        closest_point = None
-        min_dist = float('inf')
-        threshold = self.snap_threshold
+        self.clear_wall_nodes()
 
-        # Collect all endpoints from Scene Items
-        endpoints = []
-        for item in self.canvas.scene.items():
+        if not self.current_canvas: return
+
+        # Map location -> Node Item
+        # to merge shared nodes
+        loc_map = {}
+
+        walls = []
+        for item in self.current_canvas.scene.items():
             if isinstance(item, WallItem):
-                line = item.line()
-                endpoints.append((line.x1(), line.y1()))
-                endpoints.append((line.x2(), line.y2()))
+                walls.append(item)
 
-        for ep in endpoints:
-            dx = pos.x() - ep[0]
-            dy = pos.y() - ep[1]
-            dist = math.sqrt(dx*dx + dy*dy)
-            if dist < threshold:
-                if dist < min_dist:
-                    min_dist = dist
-                    closest_point = QPointF(ep[0], ep[1])
+        threshold = 5.0 # pixels to merge
 
-        if closest_point:
-            return closest_point
-        return pos
+        for w in walls:
+            line = w.line()
+            p1 = line.p1()
+            p2 = line.p2()
+
+            # Check p1
+            node1 = None
+            for loc, node in loc_map.items():
+                if math.sqrt((loc.x()-p1.x())**2 + (loc.y()-p1.y())**2) < threshold:
+                    node1 = node
+                    break
+            if not node1:
+                node1 = WallNodeItem(p1)
+                self.current_canvas.scene.addItem(node1)
+                loc_map[p1] = node1
+                self.active_wall_nodes.append(node1)
+
+            # Check p2
+            node2 = None
+            for loc, node in loc_map.items():
+                if math.sqrt((loc.x()-p2.x())**2 + (loc.y()-p2.y())**2) < threshold:
+                    node2 = node
+                    break
+            if not node2:
+                node2 = WallNodeItem(p2)
+                self.current_canvas.scene.addItem(node2)
+                loc_map[p2] = node2
+                self.active_wall_nodes.append(node2)
+
+            # Link wall to nodes
+            w.start_node = node1
+            w.end_node = node2
+
+    def clear_wall_nodes(self):
+        for node in self.active_wall_nodes:
+            if node.scene():
+                node.scene().removeItem(node)
+        self.active_wall_nodes.clear()
+
+        # Unlink walls
+        if self.current_canvas:
+            for item in self.current_canvas.scene.items():
+                if isinstance(item, WallItem):
+                    item.start_node = None
+                    item.end_node = None
 
     def handle_canvas_click(self, point):
-        # Apply snapping if applicable
-        if self.current_mode in ["DRAW_WALL"]:
+        # Delegate to existing logic but using current_canvas
+        if self.current_mode == "DRAW_WALL":
             point = self.find_snap_point(point)
 
         if self.current_mode == "CALIBRATE":
-            if not self.drawing_start_point:
-                self.drawing_start_point = point
-            else:
-                # Finish calibration line
-                end_point = point
-                dist_px = math.sqrt((end_point.x() - self.drawing_start_point.x())**2 +
-                                    (end_point.y() - self.drawing_start_point.y())**2)
-
-                # Remove temp line
-                if self.temp_line_item:
-                    self.canvas.scene.removeItem(self.temp_line_item)
-                    self.temp_line_item = None
-                self.drawing_start_point = None
-
-                if dist_px < 5:
-                    self.status_bar.showMessage("Distance too short for calibration.")
-                    return
-
-                dialog = CalibrationDialog(dist_px, self)
-                if dialog.exec():
-                    real_dist = dialog.real_distance
-                    self.pixels_per_meter = dist_px / real_dist
-                    self.lbl_ppm.setText(f"Scale: {self.pixels_per_meter:.2f} px/m")
-                    self.status_bar.showMessage(f"Calibrated: {self.pixels_per_meter:.2f} px/m")
-                    self.set_mode("SELECT")
-
+            self._handle_calibrate_click(point)
         elif self.current_mode == "DRAW_WALL":
-            if not self.drawing_start_point:
-                self.drawing_start_point = point
-            else:
-                end_point = point
-                # Save Wall to Scene
-                material_name = self.combo_materials.currentText()
-                color_hex = self.materials_data.get(material_name, {}).get('color', '#000000')
-
-                # Create WallItem
-                wall_item = WallItem(
-                    (self.drawing_start_point.x(), self.drawing_start_point.y()),
-                    (end_point.x(), end_point.y()),
-                    material_name,
-                    color_hex
-                )
-
-                # Use Command (Scene addition happens in execute)
-                cmd = AddWallCommand(self.canvas.scene, wall_item)
-                self.undo_stack.push(cmd)
-
-                # Remove temp line
-                if self.temp_line_item:
-                    self.canvas.scene.removeItem(self.temp_line_item)
-                    self.temp_line_item = None
-
-                # Trigger Heatmap
-                self.trigger_heatmap()
-
-                # Continue drawing (Polyline behavior)
-                self.drawing_start_point = point
-                self.status_bar.showMessage(f"Wall added. Click to continue, or change tool to stop.")
-
+            self._handle_wall_click(point)
         elif self.current_mode == "ADD_AP":
-            model_name = self.combo_aps.currentText()
+            self._handle_ap_click(point)
+        elif self.current_mode == "DRAW_ZONE":
+            self._handle_zone_click(point)
 
-            # Auto-Naming
-            ap_name = f"AP{self.ap_counter:02}"
-            self.ap_counter += 1
+    def _handle_calibrate_click(self, point):
+        if not self.drawing_start_point:
+            self.drawing_start_point = point
+        else:
+            end_point = point
+            dist_px = math.sqrt((end_point.x() - self.drawing_start_point.x())**2 +
+                                (end_point.y() - self.drawing_start_point.y())**2)
 
-            ap_item = AccessPointItem(point.x(), point.y(), model_name, ap_name)
+            self.reset_drawing_state()
 
-            # Use Command
-            cmd = AddAPCommand(self.canvas.scene, ap_item)
+            if dist_px < 5:
+                return
+
+            dialog = CalibrationDialog(dist_px, self)
+            if dialog.exec():
+                real_dist = dialog.real_distance
+                ppm = dist_px / real_dist
+
+                # Update Floor Scale
+                self.current_floor.pixels_per_meter = ppm
+                self.lbl_ppm.setText(f"Scale: {ppm:.2f} px/m")
+                self.status_bar.showMessage(f"Calibrated: {ppm:.2f} px/m")
+                self.set_mode("SELECT")
+
+    def _handle_wall_click(self, point):
+        if not self.drawing_start_point:
+            self.drawing_start_point = point
+        else:
+            end_point = point
+            # Create Wall
+            mat_name = self.combo_materials.currentText()
+            wall_mats = {m['name']: m for m in self.materials_data.get('materials', [])}
+            color = wall_mats.get(mat_name, {}).get('color', '#000000')
+
+            wall_item = WallItem(
+                (self.drawing_start_point.x(), self.drawing_start_point.y()),
+                (end_point.x(), end_point.y()),
+                mat_name,
+                color
+            )
+
+            cmd = AddWallCommand(self.current_canvas.scene, wall_item)
             self.undo_stack.push(cmd)
 
+            self.reset_drawing_state()
             self.trigger_heatmap()
 
-            self.status_bar.showMessage(f"Added AP: {model_name}")
+            # Continue drawing
+            self.drawing_start_point = point
+
+    def _handle_ap_click(self, point):
+        model = self.combo_aps.currentText()
+        name = f"AP{self.project.next_ap_id:02}"
+        self.project.next_ap_id += 1
+
+        ap_item = AccessPointItem(point.x(), point.y(), model, name)
+
+        cmd = AddAPCommand(self.current_canvas.scene, ap_item)
+        self.undo_stack.push(cmd)
+
+        self.trigger_heatmap()
+
+    def _handle_zone_click(self, point):
+        if not self.drawing_start_point:
+            self.drawing_start_point = point
+        else:
+            end_point = point
+
+            rect = QRectF(self.drawing_start_point, end_point).normalized()
+
+            self.reset_drawing_state()
+
+            # Prompt for Height
+            h, ok = QDoubleSpinBox.valueFromText(3.0) # wait, InputDialog logic needed
+            h, ok = QInputDialog.getDouble(self, "Ceiling Height", "Enter Ceiling Height (m):", 3.0, 1.0, 50.0, 2)
+
+            if ok:
+                zone_item = ZoneItem(rect, h)
+                self.current_canvas.scene.addItem(zone_item)
+                self.status_bar.showMessage("Zone Added.")
 
     def handle_canvas_move(self, point):
+        # Update Wall Nodes logic (Handled by WallItem.update_positions called via itemChange in Node)
+        # We need to make sure update positions is called.
+        # WallNodeItem sends geometry changes, but WallItem needs to listen?
+        # In my items.py code, I didn't implement the listener fully.
+        # But here in handle_canvas_move, we are tracking mouse movement for drawing tools.
+        # Node dragging is handled by QGraphicsItem standard movable flags and ItemChange.
+        # We need to hook into the scene update or implement the link.
+
+        # Let's fix the Node dragging update in the loop below or via signal.
+        # Since QGraphicsItem doesn't emit signals easily, we can check selection/movement here?
+        # Actually, `handle_canvas_move` is called on mouseMoveEvent of View.
+
+        if self.current_mode == "EDIT_NODES":
+            # Check if any node is moving?
+            # Better: iterate walls and call update_positions()
+            # This is inefficient but works for Phase 2.
+            if self.current_canvas:
+                for item in self.current_canvas.scene.items():
+                    if isinstance(item, WallItem):
+                        item.update_positions()
+
         if self.current_mode in ["CALIBRATE", "DRAW_WALL"] and self.drawing_start_point:
-            # Snap logic for move
             if self.current_mode == "DRAW_WALL":
                 point = self.find_snap_point(point)
 
-            # Defensive: Check if temp_line_item was deleted externally
-            if self.temp_line_item:
-                try:
-                    # Check validity by accessing a property
-                    _ = self.temp_line_item.scene()
-                except RuntimeError:
-                    self.temp_line_item = None
-
             if not self.temp_line_item:
                 self.temp_line_item = QGraphicsLineItem()
-                pen = self.temp_line_item.pen()
-
+                pen = QPen()
                 if self.current_mode == "CALIBRATE":
                     pen.setColor(Qt.red)
-                    pen.setWidth(2)
-                elif self.current_mode == "DRAW_WALL":
-                    # Use material color
-                    material_name = self.combo_materials.currentText()
-                    color_hex = self.materials_data.get(material_name, {}).get('color', '#0000FF')
-                    pen.setColor(QColor(color_hex))
-                    pen.setWidth(4)
                 else:
                     pen.setColor(Qt.blue)
-                    pen.setWidth(2)
-
+                pen.setWidth(2)
                 self.temp_line_item.setPen(pen)
-                self.canvas.scene.addItem(self.temp_line_item)
-
-            # If drawing wall, check if material changed mid-draw?
-            # It's better to update pen on move if needed, but for now only on init is fine
-            # unless user changes combo while dragging (unlikely).
+                self.current_canvas.scene.addItem(self.temp_line_item)
 
             line = self.temp_line_item.line()
             line.setP1(self.drawing_start_point)
             line.setP2(point)
             self.temp_line_item.setLine(line)
+
+        elif self.current_mode == "DRAW_ZONE" and self.drawing_start_point:
+            if not self.temp_rect_item:
+                self.temp_rect_item = QGraphicsRectItem()
+                self.temp_rect_item.setPen(QPen(Qt.blue, 1, Qt.DashLine))
+                self.current_canvas.scene.addItem(self.temp_rect_item)
+
+            rect = QRectF(self.drawing_start_point, point).normalized()
+            self.temp_rect_item.setRect(rect)
+
+    def handle_canvas_release(self, point):
+        # Handle Move AP
+        scene = self.current_canvas.scene
+        selected = scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            item = selected[0]
+            if self.selected_item_start_pos is not None:
+                new_pos = item.pos()
+                if new_pos != self.selected_item_start_pos:
+                    cmd = MoveCommand(item, self.selected_item_start_pos, new_pos)
+                    self.undo_stack.push(cmd)
+                    self.selected_item_start_pos = new_pos
+                    self.trigger_heatmap()
+
+    def on_selection_changed(self):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            self.selected_item_start_pos = selected[0].pos()
+        else:
+            self.selected_item_start_pos = None
+
+    # --- Utility ---
+    def find_snap_point(self, pos):
+        if not self.current_canvas: return pos
+        threshold = self.project.snap_threshold
+        closest = None
+        min_dist = float('inf')
+
+        endpoints = []
+        for item in self.current_canvas.scene.items():
+            if isinstance(item, WallItem):
+                l = item.line()
+                endpoints.append((l.x1(), l.y1()))
+                endpoints.append((l.x2(), l.y2()))
+
+        for ep in endpoints:
+            dist = math.sqrt((pos.x()-ep[0])**2 + (pos.y()-ep[1])**2)
+            if dist < threshold and dist < min_dist:
+                min_dist = dist
+                closest = QPointF(ep[0], ep[1])
+
+        return closest if closest else pos
+
+    def trigger_heatmap(self):
+        # Multi-floor Heatmap Logic
+        if not self.current_canvas or not self.current_floor: return
+        if self.current_floor.pixels_per_meter <= 0: return # No scale
+
+        current_walls = []
+        for item in self.current_canvas.scene.items():
+            if isinstance(item, WallItem):
+                l = item.line()
+                current_walls.append({
+                    'p1': (l.x1(), l.y1()),
+                    'p2': (l.x2(), l.y2()),
+                    'material': item.material_name
+                })
+
+        # Calculate Floor Z Levels
+        sorted_floors = sorted(enumerate(self.project.floors), key=lambda x: x[1].floor_number)
+        floor_z_map = {}
+        current_z = 0.0
+        for idx, f in sorted_floors:
+            floor_z_map[idx] = current_z
+            current_z += f.ceiling_height # Accumulate floor height
+
+        target_floor_idx = self.tabs.currentIndex()
+        target_z = floor_z_map.get(target_floor_idx, 0.0)
+
+        # Collect APs with Accurate Z (Slab + Ceiling/Zone)
+        all_aps = []
+
+        for idx, floor in enumerate(self.project.floors):
+            canvas = self.tabs.widget(idx) # PlanCanvas
+            floor_slab_z = floor_z_map.get(idx, 0.0)
+
+            # Identify Zones for this floor (if open in canvas, use items; else floor data)
+            zones = []
+            if canvas:
+                 for item in canvas.scene.items():
+                    if isinstance(item, ZoneItem):
+                        zones.append(item)
+
+            floor_aps = []
+            if canvas:
+                for item in canvas.scene.items():
+                    if isinstance(item, AccessPointItem):
+                        pos = item.scenePos()
+
+                        # Calculate effective Z (Ceiling Height override)
+                        ap_z_offset = floor.ceiling_height # Default
+
+                        # Check Zones
+                        for z_item in zones:
+                            if z_item.mapToScene(z_item.boundingRect()).contains(pos):
+                                ap_z_offset = z_item.ceiling_height
+                                break
+
+                        floor_aps.append({
+                            'x': pos.x(),
+                            'y': pos.y(),
+                            'z': floor_slab_z + ap_z_offset, # Absolute Z
+                            'model': item.model_name
+                        })
+            else:
+                # Fallback to stored data if tab not active?
+                # For robust multi-floor, we should read stored APs if canvas closed,
+                # but currently we keep all tabs open.
+                pass
+            all_aps.extend(floor_aps)
+
+        if not all_aps:
+            return
+
+        self.status_bar.showMessage("Generating Heatmap...")
+        QApplication.processEvents()
+
+        width = int(self.current_canvas.sceneRect().width())
+        height = int(self.current_canvas.sceneRect().height())
+        if width <= 0 or height <= 0: return
+
+        rssi_grid = generate_heatmap(
+            width, height,
+            self.current_floor.pixels_per_meter,
+            all_aps,
+            current_walls,
+            self.hardware_data,
+            self.materials_data,
+            frequency_band=self.combo_band.currentText(),
+            resolution=20,
+            target_z=target_z,
+            floors_config=self.project.floors,
+            floor_z_map=floor_z_map
+        )
+
+        pixmap = heatmap_to_pixmap(rssi_grid, width, height,
+                                   self.project.heatmap_min_dbm,
+                                   self.project.heatmap_max_dbm)
+
+        if self.current_canvas.heatmap_item:
+            self.current_canvas.scene.removeItem(self.current_canvas.heatmap_item)
+
+        self.current_canvas.heatmap_item = QGraphicsPixmapItem(pixmap)
+        self.current_canvas.heatmap_item.setZValue(10)
+        self.current_canvas.scene.addItem(self.current_canvas.heatmap_item)
+        self.status_bar.showMessage("Heatmap generated.")
+
+    def save_project(self):
+        # Sync Scene items back to Floor objects before saving
+        for idx, floor in enumerate(self.project.floors):
+            canvas = self.tabs.widget(idx)
+            if canvas:
+                # Walls
+                walls = []
+                for item in canvas.scene.items():
+                    if isinstance(item, WallItem):
+                        l = item.line()
+                        walls.append({
+                            'p1': (l.x1(), l.y1()),
+                            'p2': (l.x2(), l.y2()),
+                            'material': item.material_name
+                        })
+                floor.walls = walls
+
+                # APs
+                aps = []
+                for item in canvas.scene.items():
+                    if isinstance(item, AccessPointItem):
+                        aps.append({
+                            'x': item.scenePos().x(),
+                            'y': item.scenePos().y(),
+                            'model': item.model_name,
+                            'name': item.name
+                        })
+                floor.access_points = aps
+
+                # Zones
+                zones = []
+                for item in canvas.scene.items():
+                    if isinstance(item, ZoneItem):
+                         r = item.rect()
+                         zones.append({
+                             'rect': [r.x(), r.y(), r.width(), r.height()],
+                             'height': item.ceiling_height
+                         })
+                floor.regions = zones
+
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Project", "", "WiFi Project (*.wifi)")
+        if file_path:
+            save_project(file_path, self.project)
+            self.status_bar.showMessage(f"Saved to {file_path}")
+
+    def open_project(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Open Project", "", "WiFi Project (*.wifi)")
+        if file_path:
+            proj = load_project(file_path)
+            if proj:
+                self.project = proj
+                # Clear UI
+                self.tabs.clear()
+                # Rebuild UI
+                for floor in self.project.floors:
+                    self._add_tab_for_floor(floor)
+                self.status_bar.showMessage(f"Loaded {file_path}")
+
+    def undo_last_action(self):
+        if self.undo_stack.undo():
+            self.trigger_heatmap()
+
+    def open_settings(self):
+        dialog = SettingsDialog(self.project.heatmap_min_dbm,
+                                self.project.heatmap_max_dbm,
+                                self.project.snap_threshold, self)
+        if dialog.exec():
+            v = dialog.get_values()
+            self.project.heatmap_min_dbm = v[0]
+            self.project.heatmap_max_dbm = v[1]
+            self.project.snap_threshold = v[2]
 
 def main():
     app = QApplication(sys.argv)

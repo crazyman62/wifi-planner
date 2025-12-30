@@ -1,6 +1,28 @@
-from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsItem, QGraphicsSimpleTextItem, QInputDialog, QMenu
+from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsItem, QGraphicsSimpleTextItem, QInputDialog, QMenu, QGraphicsRectItem
 from PySide6.QtGui import QPen, QColor, QBrush
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPointF
+
+class WallNodeItem(QGraphicsEllipseItem):
+    """
+    A handle for a wall endpoint.
+    """
+    def __init__(self, point, parent=None):
+        r = 6
+        super().__init__(point.x() - r, point.y() - r, 2*r, 2*r, parent)
+        self.setBrush(QBrush(QColor("blue")))
+        self.setPen(QPen(Qt.white))
+        self.setFlags(QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemSendsGeometryChanges)
+        self.setZValue(5) # Above walls
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange:
+            # We need to update connected walls
+            # But we don't know them directly unless we store references or parent observes.
+            # Best practice: Signal or callback? QGraphicsItems don't have signals.
+            # We can rely on Scene to handle this, or store list of connected walls.
+            pass
+        return super().itemChange(change, value)
+
 
 class WallItem(QGraphicsLineItem):
     def __init__(self, p1, p2, material_name, color_hex, parent=None):
@@ -16,12 +38,11 @@ class WallItem(QGraphicsLineItem):
         # Flags
         self.setFlags(QGraphicsItem.ItemIsSelectable)
 
-    def paint(self, painter, option, widget=None):
-        # Override paint to handle selection appearance if needed,
-        # or rely on standard dashed line for selection.
-        # For simple lines, standard Qt selection style is usually a dashed box around it,
-        # which looks ugly for lines. Let's make the line thicker or change color when selected.
+        # References to nodes (managed by Canvas/Tool)
+        self.start_node = None
+        self.end_node = None
 
+    def paint(self, painter, option, widget=None):
         if self.isSelected():
             pen = QPen(QColor(Qt.yellow)) # Highlight color
             pen.setWidth(6)
@@ -30,6 +51,27 @@ class WallItem(QGraphicsLineItem):
             painter.setPen(self.default_pen)
 
         painter.drawLine(self.line())
+
+    def update_positions(self):
+        if self.start_node and self.end_node:
+            line = self.line()
+            # Node pos is top-left of rect? No, if we center it...
+            # We need center of node.
+            p1 = self.start_node.scenePos() + QPointF(6, 6) # Radius offset correction if needed?
+            # Actually WallNodeItem is placed at (x-r, y-r). scenePos gives (x-r, y-r).
+            # Center is scenePos + (r, r).
+
+            # Wait, itemChange ItemPositionChange returns the new position of the item's origin (top-left of rect).
+            # Let's verify `AccessPointItem` logic.
+            # If we just use center() of rect in local coords mapped to scene?
+
+            r = 6
+            c1 = self.start_node.sceneBoundingRect().center()
+            c2 = self.end_node.sceneBoundingRect().center()
+
+            line.setP1(c1)
+            line.setP2(c2)
+            self.setLine(line)
 
 class AccessPointItem(QGraphicsEllipseItem):
     def __init__(self, x, y, model_name, name="AP", parent=None):
@@ -62,21 +104,13 @@ class AccessPointItem(QGraphicsEllipseItem):
     def _update_text_pos(self):
         # Center text below the circle
         rect = self.text_item.boundingRect()
-        # Item coords: circle center is roughly at r, r relative to rect top-left?
-        # Actually in QGraphicsEllipseItem, (0,0) is top left of the rect we passed.
-        # We passed (x-r, y-r, 2r, 2r).
-        # So in local coords, the circle is (0,0, 2r, 2r). Center is (r, r).
-
         r = 10
         x_center = r
         y_bottom = 2 * r + 2
-
         self.text_item.setPos(x_center - rect.width() / 2, y_bottom)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange and self.scene():
-            # Notify scene or parent if needed for live updates,
-            # but for Undo/Redo we handle it via mouse release in MainWindow or Canvas.
             pass
         return super().itemChange(change, value)
 
@@ -85,26 +119,39 @@ class AccessPointItem(QGraphicsEllipseItem):
             self.setPen(QPen(QColor(Qt.yellow), 2))
         else:
             self.setPen(QPen(Qt.black, 1))
-
         super().paint(painter, option, widget)
 
     def contextMenuEvent(self, event):
         menu = QMenu()
         rename_action = menu.addAction("Rename")
         delete_action = menu.addAction("Delete")
-
         action = menu.exec(event.screenPos())
-
         if action == rename_action:
             new_name, ok = QInputDialog.getText(None, "Rename AP", "New Name:", text=self.name)
             if ok and new_name:
                 self.set_name(new_name)
-                # Note: This change isn't strictly undoable via the current UndoStack unless we add a RenameCommand.
-                # For Phase 1, direct modification is likely acceptable, or we can leave it as is.
         elif action == delete_action:
-            # We need to trigger deletion in MainWindow to handle UndoStack.
-            # We can't easily access MainWindow here without passing it down.
-            # Alternative: ignore context menu delete and use 'Delete' key,
-            # OR assume scene has a view which has a window.
-            # For now, let's just let the user know they can press Delete, or emit a signal if we could.
             pass
+
+class ZoneItem(QGraphicsRectItem):
+    """
+    Rectangular zone for ceiling height overrides.
+    """
+    def __init__(self, rect, ceiling_height, parent=None):
+        super().__init__(rect, parent)
+        self.ceiling_height = ceiling_height
+
+        # Appearance
+        self.setBrush(QBrush(QColor(100, 100, 255, 50))) # Semi-transparent blue
+        self.setPen(QPen(Qt.blue, 1, Qt.DashLine))
+
+        self.setFlags(QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemSendsGeometryChanges)
+
+        # Label
+        self.text_item = QGraphicsSimpleTextItem(f"H: {ceiling_height}m", self)
+        self.text_item.setBrush(QBrush(Qt.blue))
+        self.text_item.setPos(rect.x() + 5, rect.y() + 5)
+
+    def set_height(self, h):
+        self.ceiling_height = h
+        self.text_item.setText(f"H: {h}m")
