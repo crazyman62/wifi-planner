@@ -51,19 +51,21 @@ class PlanCanvas(QGraphicsView):
 
         self.pixmap_item = QGraphicsPixmapItem(pixmap)
 
+        # Set Transform Origin to Center for better rotation
+        cx = pixmap.width() / 2
+        cy = pixmap.height() / 2
+        self.pixmap_item.setTransformOriginPoint(cx, cy)
+
         # Apply Transforms
         # Scale (Image resolution scaling, distinct from View Zoom or Physics Scale)
         self.pixmap_item.setScale(scale_factor)
-
-        # Center of rotation should be center of image or top-left?
-        # Usually rotation around center is more intuitive for alignment,
-        # but top-left is standard. Let's start with standard.
-        # To rotate around center, we need to translate origin.
 
         # Rotation
         self.pixmap_item.setRotation(rotation)
 
         # Position (Offset)
+        # Note: Position applies to the item's top-left in Scene coords.
+        # Rotation applies around the center.
         self.pixmap_item.setPos(x_offset, y_offset)
 
         # Ensure Background is at bottom
@@ -91,6 +93,12 @@ class PlanCanvas(QGraphicsView):
             return
 
         self.ghost_pixmap_item = QGraphicsPixmapItem(pixmap)
+
+        # Center Origin for Ghost too
+        cx = pixmap.width() / 2
+        cy = pixmap.height() / 2
+        self.ghost_pixmap_item.setTransformOriginPoint(cx, cy)
+
         self.ghost_pixmap_item.setOpacity(0.3)
         self.ghost_pixmap_item.setScale(scale_factor)
         self.ghost_pixmap_item.setRotation(rotation)
@@ -101,6 +109,7 @@ class PlanCanvas(QGraphicsView):
 
     def update_image_transform(self, x, y, rotation, scale):
         if self.pixmap_item:
+            # Origin point persists, just update properties
             self.pixmap_item.setPos(x, y)
             self.pixmap_item.setRotation(rotation)
             self.pixmap_item.setScale(scale)
