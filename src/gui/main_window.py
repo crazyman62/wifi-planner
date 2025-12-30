@@ -348,7 +348,8 @@ class MainWindow(QMainWindow):
         zones = []
         for item in canvas.scene.items():
             if isinstance(item, ZoneItem):
-                 r = item.rect()
+                 # Use sceneBoundingRect to capture position + geometry
+                 r = item.sceneBoundingRect()
                  zones.append({
                      'rect': [r.x(), r.y(), r.width(), r.height()],
                      'height': item.ceiling_height
@@ -1012,7 +1013,7 @@ class MainWindow(QMainWindow):
                 zones = []
                 for item in canvas.scene.items():
                     if isinstance(item, ZoneItem):
-                         r = item.rect()
+                         r = item.sceneBoundingRect()
                          zones.append({
                              'rect': [r.x(), r.y(), r.width(), r.height()],
                              'height': item.ceiling_height

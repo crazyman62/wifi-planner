@@ -77,7 +77,11 @@ class AccessPointItem(QGraphicsEllipseItem):
     def __init__(self, x, y, model_name, name="AP", parent=None):
         # Radius 10px
         r = 10
-        super().__init__(x - r, y - r, 2 * r, 2 * r, parent)
+        # Initialize centered at local (0,0)
+        super().__init__(-r, -r, 2 * r, 2 * r, parent)
+
+        # Set scene position
+        self.setPos(x, y)
 
         self.model_name = model_name
         self.name = name
@@ -105,8 +109,8 @@ class AccessPointItem(QGraphicsEllipseItem):
         # Center text below the circle
         rect = self.text_item.boundingRect()
         r = 10
-        x_center = r
-        y_bottom = 2 * r + 2
+        x_center = 0 # Center of circle (0,0)
+        y_bottom = r + 2
         self.text_item.setPos(x_center - rect.width() / 2, y_bottom)
 
     def itemChange(self, change, value):
