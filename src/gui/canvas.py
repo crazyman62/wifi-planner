@@ -10,6 +10,7 @@ class PlanCanvas(QGraphicsView):
 
     # Signals for interactions
     point_clicked = Signal(QPointF)
+    right_clicked = Signal(QPointF) # New signal for right click
     mouse_moved = Signal(QPointF)
     mouse_released = Signal(QPointF) # New signal for drag end
 
@@ -29,6 +30,7 @@ class PlanCanvas(QGraphicsView):
 
         self.pixmap_item = None
         self.ghost_pixmap_item = None
+        self.heatmap_item = None # Explicitly init attribute
 
         # Calibration state
         self.temp_line = None
@@ -155,6 +157,10 @@ class PlanCanvas(QGraphicsView):
         elif event.button() == Qt.LeftButton:
             scene_pos = self.mapToScene(event.position().toPoint())
             self.point_clicked.emit(scene_pos)
+            super().mousePressEvent(event)
+        elif event.button() == Qt.RightButton:
+            scene_pos = self.mapToScene(event.position().toPoint())
+            self.right_clicked.emit(scene_pos)
             super().mousePressEvent(event)
         else:
             super().mousePressEvent(event)

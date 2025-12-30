@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
                                QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox,
                                QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox)
-from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter
+from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter, QMouseEvent
 from PySide6.QtCore import Qt, QPointF, QRectF
 
 from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsPixmapItem, QGraphicsRectItem
@@ -395,6 +395,7 @@ class MainWindow(QMainWindow):
 
         # Connect signals
         canvas.point_clicked.connect(self.handle_canvas_click)
+        canvas.right_clicked.connect(self.handle_canvas_right_click) # Connect new signal
         canvas.mouse_moved.connect(self.handle_canvas_move)
         canvas.mouse_released.connect(self.handle_canvas_release)
         canvas.scene.selectionChanged.connect(self.on_selection_changed)
@@ -410,6 +411,9 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(canvas, floor.name)
         self.tabs.setCurrentWidget(canvas)
+
+        # Ensure heatmap_item exists (fix attribute error)
+        canvas.heatmap_item = None
 
     def _populate_canvas_items(self, canvas, floor):
         # Walls
@@ -611,6 +615,11 @@ class MainWindow(QMainWindow):
                     item.end_node = None
 
     def handle_canvas_click(self, point):
+        # Handle Right Click logic if needed, but standard Qt events separate Press/Click.
+        # But this method is called by a Signal from PlanCanvas.
+        # We need to update PlanCanvas to distinguish clicks or buttons.
+        # Currently, PlanCanvas only emits point_clicked on LeftButton.
+
         # Delegate to existing logic but using current_canvas
         if self.current_mode == "DRAW_WALL":
             point = self.find_snap_point(point)
@@ -668,11 +677,21 @@ class MainWindow(QMainWindow):
             cmd = AddWallCommand(self.current_canvas.scene, wall_item)
             self.undo_stack.push(cmd)
 
-            self.reset_drawing_state()
+            # Reset temp line but keep drawing from new end point if polyline desired
+            # But the user asked for: "if I right click, I should be able to draw a new wall not associated to the old node."
+            # This implies by default it IS associated.
+            # So here we want to CONTINUE drawing.
+
+            if self.temp_line_item:
+                if self.temp_line_item.scene():
+                    self.temp_line_item.scene().removeItem(self.temp_line_item)
+                self.temp_line_item = None
+
+            self.drawing_start_point = point # Start next wall from end of this one
             self.trigger_heatmap()
 
-            # Continue drawing
-            self.drawing_start_point = point
+            # Status update
+            self.status_bar.showMessage("Wall added. Click to continue, Right-click to stop.")
 
     def _handle_ap_click(self, point):
         model = self.combo_aps.currentText()
@@ -776,6 +795,26 @@ class MainWindow(QMainWindow):
             self.selected_item_start_pos = selected[0].pos()
         else:
             self.selected_item_start_pos = None
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Delete:
+            if not self.current_canvas: return
+            scene = self.current_canvas.scene
+            selected_items = scene.selectedItems()
+            if selected_items:
+                # Use Command
+                cmd = DeleteCommand(scene, selected_items)
+                self.undo_stack.push(cmd)
+                self.status_bar.showMessage(f"Deleted {len(selected_items)} items.")
+                self.trigger_heatmap()
+        else:
+            super().keyPressEvent(event)
+
+    def handle_canvas_right_click(self, point):
+        # Stop drawing
+        if self.current_mode == "DRAW_WALL" and self.drawing_start_point:
+            self.reset_drawing_state()
+            self.status_bar.showMessage("Wall drawing stopped.")
 
     # --- Utility ---
     def find_snap_point(self, pos):
@@ -894,6 +933,10 @@ class MainWindow(QMainWindow):
         pixmap = heatmap_to_pixmap(rssi_grid, width, height,
                                    self.project.heatmap_min_dbm,
                                    self.project.heatmap_max_dbm)
+
+        # Ensure heatmap_item attribute exists if we init tabs dynamically
+        if not hasattr(self.current_canvas, 'heatmap_item'):
+            self.current_canvas.heatmap_item = None
 
         if self.current_canvas.heatmap_item:
             self.current_canvas.scene.removeItem(self.current_canvas.heatmap_item)
