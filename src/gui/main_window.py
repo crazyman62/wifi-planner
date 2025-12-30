@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
                                QToolBar, QStatusBar, QComboBox, QListWidget)
 from PySide6.QtGui import QAction, QIcon, QPen, QColor
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPointF
 
 from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsPixmapItem
 from src.gui.canvas import PlanCanvas
