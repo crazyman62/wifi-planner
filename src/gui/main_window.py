@@ -937,6 +937,11 @@ class MainWindow(QMainWindow):
         # Update to use the full scene rect (including moved images)
         # We use itemsBoundingRect to get the extent of all items (Image, Walls, APs)
         rect = self.current_canvas.scene.itemsBoundingRect()
+
+        # Add Padding/Bleed (e.g., 200 pixels margin)
+        margin = 200
+        rect.adjust(-margin, -margin, margin, margin)
+
         width = int(rect.width())
         height = int(rect.height())
 
