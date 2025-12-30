@@ -1,7 +1,8 @@
 import json
 import os
 
-def save_project(filepath, image_path, ppm, walls, access_points):
+def save_project(filepath, image_path, ppm, walls, access_points,
+                 snap_dist=15, heatmap_min=-85, heatmap_max=-30):
     """
     Saves the project state to a JSON file.
     """
@@ -9,7 +10,12 @@ def save_project(filepath, image_path, ppm, walls, access_points):
         "image_path": image_path,
         "pixels_per_meter": ppm,
         "walls": walls,
-        "access_points": access_points
+        "access_points": access_points,
+        "settings": {
+            "snap_distance": snap_dist,
+            "heatmap_min_dbm": heatmap_min,
+            "heatmap_max_dbm": heatmap_max
+        }
     }
 
     with open(filepath, 'w') as f:

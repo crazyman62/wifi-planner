@@ -268,7 +268,8 @@ class MainWindow(QMainWindow):
 
         if file_path:
             save_project(file_path, self.current_image_path, self.pixels_per_meter,
-                         walls_to_save, aps_to_save)
+                         walls_to_save, aps_to_save,
+                         self.snap_threshold, self.heatmap_min_dbm, self.heatmap_max_dbm)
             self.status_bar.showMessage(f"Saved to {file_path}")
 
     def open_project(self):
@@ -287,6 +288,12 @@ class MainWindow(QMainWindow):
                     self.canvas.load_image(self.current_image_path)
 
                 self.pixels_per_meter = data.get("pixels_per_meter", 1.0)
+
+                # Load Settings
+                settings = data.get("settings", {})
+                self.snap_threshold = settings.get("snap_distance", 15)
+                self.heatmap_min_dbm = settings.get("heatmap_min_dbm", -85)
+                self.heatmap_max_dbm = settings.get("heatmap_max_dbm", -30)
 
                 # Redraw UI elements (Walls)
 
