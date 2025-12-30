@@ -3,7 +3,7 @@ import json
 import os
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
-                               QToolBar, QStatusBar, QComboBox, QListWidget)
+                               QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox)
 from PySide6.QtGui import QAction, QIcon, QPen, QColor
 from PySide6.QtCore import Qt, QPointF
 
@@ -140,6 +140,27 @@ class MainWindow(QMainWindow):
         self.combo_band.addItems(["2.4", "5", "6"])
         self.combo_band.setCurrentText("5")
         self.sidebar_layout.addWidget(self.combo_band)
+
+        # Heatmap Settings
+        self.sidebar_layout.addWidget(QLabel("<b>Heatmap Range (dBm)</b>"))
+
+        # Max Signal (Blue)
+        range_layout = QHBoxLayout()
+        range_layout.addWidget(QLabel("High (Blue):"))
+        self.spin_max_dbm = QSpinBox()
+        self.spin_max_dbm.setRange(-100, 0)
+        self.spin_max_dbm.setValue(-30) # Default to -30 based on indoor norms
+        range_layout.addWidget(self.spin_max_dbm)
+        self.sidebar_layout.addLayout(range_layout)
+
+        # Min Signal (Red)
+        range_layout2 = QHBoxLayout()
+        range_layout2.addWidget(QLabel("Low (Red):"))
+        self.spin_min_dbm = QSpinBox()
+        self.spin_min_dbm.setRange(-120, -10)
+        self.spin_min_dbm.setValue(-85) # Default to -85
+        range_layout2.addWidget(self.spin_min_dbm)
+        self.sidebar_layout.addLayout(range_layout2)
 
         # Calculate Button
         self.btn_calculate = QPushButton("Generate Heatmap")
@@ -347,8 +368,12 @@ class MainWindow(QMainWindow):
             resolution=20 # Lower res for speed
         )
 
+        # Get Visualization Settings
+        min_dbm = self.spin_min_dbm.value()
+        max_dbm = self.spin_max_dbm.value()
+
         # Convert to Pixmap
-        pixmap = heatmap_to_pixmap(rssi_grid, width, height)
+        pixmap = heatmap_to_pixmap(rssi_grid, width, height, min_dbm=min_dbm, max_dbm=max_dbm)
 
         # Display
         if self.heatmap_item:

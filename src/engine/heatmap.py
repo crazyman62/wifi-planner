@@ -109,30 +109,26 @@ def generate_heatmap(
 
     return heatmap
 
-def heatmap_to_pixmap(heatmap, width, height):
+def heatmap_to_pixmap(heatmap, width, height, min_dbm=-85.0, max_dbm=-30.0):
     """
     Converts a 2D RSSI grid to a QPixmap with a color map.
+
+    :param min_dbm: RSSI value for Red (Poor signal)
+    :param max_dbm: RSSI value for Blue (Strong signal)
     """
     from PySide6.QtGui import QImage, QPixmap
 
-    # Normalize or clamp for visualization
-    # User Request: Red = Poor (-80), Blue = Great (-50)
-    # Standard Jet: 0 (Blue) -> 255 (Red)
-    # So we want -50 (High) -> 0 (Blue)
-    # And -80 (Low) -> 255 (Red)
-
-    min_dbm = -80.0 # Poor
-    max_dbm = -50.0 # Great
+    # Invert Normalization for JET Colormap
+    # Standard Jet: 0=Blue, 255=Red
+    # We want: Max Signal -> Blue (0), Min Signal -> Red (255)
 
     # Clamp first
     clamped = np.clip(heatmap, min_dbm, max_dbm)
 
     # Calculate normalization
-    # If val = -50 (max), we want norm = 0
-    # If val = -80 (min), we want norm = 1
+    # If val = max_dbm, we want norm = 0
+    # If val = min_dbm, we want norm = 1
     # Formula: (max_dbm - val) / (max_dbm - min_dbm)
-    # Check: (-50 - (-50)) / 30 = 0
-    # Check: (-50 - (-80)) / 30 = 30/30 = 1
 
     norm = (max_dbm - clamped) / (max_dbm - min_dbm)
 
