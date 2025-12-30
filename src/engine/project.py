@@ -74,9 +74,9 @@ class Project:
 
     def add_floor(self, floor):
         self.floors.append(floor)
-        # Sort floors by number? Or keep insertion order?
-        # Usually stacking order matters. Let's sort by number.
-        self.floors.sort(key=lambda f: f.floor_number)
+        # Note: We do NOT sort floors by floor_number anymore.
+        # Order is determined by insertion (and thus tab order).
+        # self.floors.sort(key=lambda f: f.floor_number)
 
     def get_floor(self, index):
         if 0 <= index < len(self.floors):

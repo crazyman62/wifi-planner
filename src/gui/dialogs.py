@@ -81,12 +81,13 @@ class SettingsDialog(QDialog):
 
 
 class AddFloorDialog(QDialog):
-    def __init__(self, floor_materials, parent=None):
+    def __init__(self, floor_materials, parent=None, initial_data=None):
         super().__init__(parent)
-        self.setWindowTitle("Add New Floor")
+        self.setWindowTitle("Floor Configuration")
         self.resize(400, 300)
 
         self.image_path = None
+        self.is_edit_mode = initial_data is not None
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -127,6 +128,21 @@ class AddFloorDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+        # Populate if editing
+        if initial_data:
+            self.edit_name.setText(initial_data.get('name', ''))
+            self.spin_number.setValue(initial_data.get('number', 1))
+            self.spin_ceiling.setValue(initial_data.get('ceiling_height', 3.0))
+            mat = initial_data.get('material', '')
+            idx = self.combo_material.findText(mat)
+            if idx >= 0: self.combo_material.setCurrentIndex(idx)
+
+            self.image_path = initial_data.get('image_path')
+            if self.image_path:
+                self.lbl_image_status.setText(os.path.basename(self.image_path))
+            else:
+                self.lbl_image_status.setText("No image set")
+
     def select_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open Floor Plan", "", "Images (*.png *.jpg *.jpeg *.bmp)"
@@ -139,7 +155,11 @@ class AddFloorDialog(QDialog):
         if not self.edit_name.text():
             QMessageBox.warning(self, "Input Error", "Please provide a floor name.")
             return
-        if not self.image_path:
+        if not self.image_path and not self.is_edit_mode:
+            # Require image for new floors, optional for edit (implies keeping existing?)
+            # Actually if edit mode and image_path is None, it means no image on floor?
+            # Or if user cleared it.
+            # Let's enforce image for new floors.
             QMessageBox.warning(self, "Input Error", "Please select a floor plan image.")
             return
 

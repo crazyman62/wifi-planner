@@ -5,7 +5,7 @@ import math
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
                                QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox,
-                               QInputDialog, QTabWidget, QDoubleSpinBox)
+                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox)
 from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter
 from PySide6.QtCore import Qt, QPointF, QRectF
 
@@ -32,6 +32,10 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setTabsClosable(False)
         self.tabs.currentChanged.connect(self.on_tab_changed)
+
+        # Context Menu for Tabs
+        self.tabs.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tabs.customContextMenuRequested.connect(self.show_tab_context_menu)
 
         # Tools Sidebar
         sidebar_widget = QWidget()
@@ -243,6 +247,118 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Ready")
 
     # --- Floor Management ---
+
+    def show_tab_context_menu(self, position):
+        index = self.tabs.tabBar().tabAt(position)
+        if index >= 0:
+            menu = QMenu()
+            edit_action = menu.addAction("Edit Floor")
+            delete_action = menu.addAction("Delete Floor")
+
+            action = menu.exec(self.tabs.mapToGlobal(position))
+
+            if action == edit_action:
+                self.edit_floor(index)
+            elif action == delete_action:
+                self.delete_floor(index)
+
+    def edit_floor(self, index):
+        floor = self.project.get_floor(index)
+        if not floor: return
+
+        initial_data = floor.to_dict()
+        dialog = AddFloorDialog(self.floor_material_names, self, initial_data=initial_data)
+
+        if dialog.exec():
+            data = dialog.get_data()
+
+            # Update Object
+            floor.name = data['name']
+            floor.floor_number = data['number']
+            floor.material_name = data['material']
+            floor.ceiling_height = data['ceiling_height']
+
+            if data['image_path'] and data['image_path'] != floor.image_path:
+                # Image Changed: Sync old items to model first?
+                # If we rely on model being source of truth for items during reload,
+                # we must ensure model is up to date with scene.
+                canvas = self.tabs.widget(index)
+                if canvas:
+                    # Sync scene -> floor object
+                    self._sync_canvas_to_floor(canvas, floor)
+
+                    floor.image_path = data['image_path']
+
+                    # Clear Scene Items (except background which load_image handles, but we need to clear walls/aps)
+                    canvas.scene.clear()
+
+                    # Reload Image
+                    canvas.load_image(floor.image_path,
+                                      floor.x_offset, floor.y_offset,
+                                      floor.rotation, floor.scale_factor)
+
+                    # Re-populate items
+                    self._populate_canvas_items(canvas, floor)
+
+            # Update Tab Text
+            self.tabs.setTabText(index, floor.name)
+            self.status_bar.showMessage(f"Updated floor: {floor.name}")
+            self.trigger_heatmap()
+
+    def _sync_canvas_to_floor(self, canvas, floor):
+        """Helper to save current scene items to the floor object."""
+        # Walls
+        walls = []
+        for item in canvas.scene.items():
+            if isinstance(item, WallItem):
+                l = item.line()
+                walls.append({
+                    'p1': (l.x1(), l.y1()),
+                    'p2': (l.x2(), l.y2()),
+                    'material': item.material_name
+                })
+        floor.walls = walls
+
+        # APs
+        aps = []
+        for item in canvas.scene.items():
+            if isinstance(item, AccessPointItem):
+                aps.append({
+                    'x': item.scenePos().x(),
+                    'y': item.scenePos().y(),
+                    'model': item.model_name,
+                    'name': item.name
+                })
+        floor.access_points = aps
+
+        # Zones
+        zones = []
+        for item in canvas.scene.items():
+            if isinstance(item, ZoneItem):
+                 r = item.rect()
+                 zones.append({
+                     'rect': [r.x(), r.y(), r.width(), r.height()],
+                     'height': item.ceiling_height
+                 })
+        floor.regions = zones
+
+    def delete_floor(self, index):
+        floor = self.project.get_floor(index)
+        if not floor: return
+
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete '{floor.name}'? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            # Remove from Project
+            self.project.floors.pop(index)
+            # Remove Tab
+            self.tabs.removeTab(index)
+            self.status_bar.showMessage(f"Deleted floor: {floor.name}")
+            self.trigger_heatmap()
 
     def show_add_floor_dialog(self):
         dialog = AddFloorDialog(self.floor_material_names, self)
