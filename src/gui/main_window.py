@@ -409,6 +409,9 @@ class MainWindow(QMainWindow):
         # Re-populate items (if loading from file)
         self._populate_canvas_items(canvas, floor)
 
+        # Set current mode
+        canvas.mode = self.current_mode
+
         self.tabs.addTab(canvas, floor.name)
         self.tabs.setCurrentWidget(canvas)
 
@@ -453,6 +456,10 @@ class MainWindow(QMainWindow):
     def on_tab_changed(self, index):
         floor = self.project.get_floor(index)
         if floor:
+            # Sync mode
+            if self.current_canvas:
+                self.current_canvas.mode = self.current_mode
+
             # Update UI controls for this floor
             self.blockSignals(True) # Prevent feedback loops
             self.spin_x.setValue(floor.x_offset)
@@ -525,6 +532,11 @@ class MainWindow(QMainWindow):
             self.clear_wall_nodes()
 
         self.current_mode = mode
+
+        # Propagate mode to current canvas
+        if self.current_canvas:
+            self.current_canvas.mode = mode
+
         self.status_bar.showMessage(f"Mode: {mode}")
         self.reset_drawing_state()
 
@@ -615,11 +627,6 @@ class MainWindow(QMainWindow):
                     item.end_node = None
 
     def handle_canvas_click(self, point):
-        # Handle Right Click logic if needed, but standard Qt events separate Press/Click.
-        # But this method is called by a Signal from PlanCanvas.
-        # We need to update PlanCanvas to distinguish clicks or buttons.
-        # Currently, PlanCanvas only emits point_clicked on LeftButton.
-
         # Delegate to existing logic but using current_canvas
         if self.current_mode == "DRAW_WALL":
             point = self.find_snap_point(point)

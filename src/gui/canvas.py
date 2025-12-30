@@ -27,6 +27,7 @@ class PlanCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.NoDrag) # We will implement custom drag if needed, or use ScrollHandDrag
         self._is_panning = False
         self._pan_start = QPointF(0, 0)
+        self.mode = "SELECT" # Track current mode to decide on left-click behavior
 
         self.pixmap_item = None
         self.ghost_pixmap_item = None
@@ -118,12 +119,12 @@ class PlanCanvas(QGraphicsView):
         if modifiers & Qt.ControlModifier:
             # Vertical Pan
             delta = event.angleDelta().y()
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta)
+            self.verticalScrollBar().setValue(int(self.verticalScrollBar().value() - delta))
             event.accept()
         elif modifiers & Qt.ShiftModifier:
             # Horizontal Pan (Use Y delta as most mice have one wheel)
             delta = event.angleDelta().y()
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta)
+            self.horizontalScrollBar().setValue(int(self.horizontalScrollBar().value() - delta))
             event.accept()
         else:
             # Zoom (Default)
@@ -155,9 +156,32 @@ class PlanCanvas(QGraphicsView):
             self.setCursor(Qt.ClosedHandCursor)
             event.accept()
         elif event.button() == Qt.LeftButton:
+            if self.mode == "SELECT":
+                # Check if clicking on background -> Pan
+                item = self.itemAt(event.position().toPoint())
+                if item is None or item == self.pixmap_item or item == self.ghost_pixmap_item:
+                    self._is_panning = True
+                    self._pan_start = event.position()
+                    self.setCursor(Qt.ClosedHandCursor)
+                    event.accept()
+                    return # Don't propagate or emit click if panning
+
+                # Else clicking on an item -> Select/Move logic (default or custom)
+                # But we also might want to emit point_clicked?
+                # Usually if we click an item, we select it.
+                # super().mousePressEvent handles selection.
+                # MainWindow handles selectionChanged signal.
+
+                # But if I select an item, I might still want to emit point_clicked for consistency?
+                # Probably not needed for "SELECT" mode.
+
+                pass
+
+            # For Draw Modes, always emit click
             scene_pos = self.mapToScene(event.position().toPoint())
             self.point_clicked.emit(scene_pos)
             super().mousePressEvent(event)
+
         elif event.button() == Qt.RightButton:
             scene_pos = self.mapToScene(event.position().toPoint())
             self.right_clicked.emit(scene_pos)
@@ -173,18 +197,19 @@ class PlanCanvas(QGraphicsView):
             delta = event.position() - self._pan_start
             self._pan_start = event.position()
 
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            self.horizontalScrollBar().setValue(int(self.horizontalScrollBar().value() - delta.x()))
+            self.verticalScrollBar().setValue(int(self.verticalScrollBar().value() - delta.y()))
             event.accept()
         else:
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MiddleButton:
+        if self._is_panning:
             self._is_panning = False
             self.setCursor(Qt.ArrowCursor)
             event.accept()
-        elif event.button() == Qt.LeftButton:
+
+        if event.button() == Qt.LeftButton:
             # Emit release signal for move tracking
             scene_pos = self.mapToScene(event.position().toPoint())
             self.mouse_released.emit(scene_pos)
