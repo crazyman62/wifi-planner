@@ -353,20 +353,11 @@ class MainWindow(QMainWindow):
                     # Clear Scene Items (except background which load_image handles, but we need to clear walls/aps)
                     canvas.scene.clear()
 
-                    # Auto-Detect on Edit if requested
-                    if data.get('auto_detect'):
-                        detected_walls = detect_walls(
-                            floor.image_path,
-                            "Concrete (Standard 4\")",
-                            data.get('inner_material', 'Drywall (Wood Stud)')
-                        )
-                        if detected_walls:
-                            # Replace walls or Append? Usually replace if detecting from scratch.
-                            # But maybe we want to keep existing?
-                            # Prompt implies "when i upload... it should select default walls".
-                            # If I'm replacing the image, I probably want new walls.
-                            floor.walls = detected_walls
-                            self.status_bar.showMessage(f"Detected {len(detected_walls)} walls.")
+                    # Auto-Detect on Edit
+                    detected_walls = data.get('detected_walls')
+                    if detected_walls:
+                        floor.walls = detected_walls
+                        self.status_bar.showMessage(f"Updated walls: {len(detected_walls)} segments.")
 
                     # Reload Image
                     canvas.load_image(floor.image_path,
@@ -452,24 +443,10 @@ class MainWindow(QMainWindow):
             new_floor.ceiling_height = data['ceiling_height']
 
             # Auto-Detect Walls
-            if data.get('auto_detect') and new_floor.image_path:
-                self.status_bar.showMessage("Detecting walls...")
-                QApplication.setOverrideCursor(Qt.WaitCursor)
-                QApplication.processEvents()
-                try:
-                    detected_walls = detect_walls(
-                        new_floor.image_path,
-                        "Concrete (Standard 4\")",
-                        data.get('inner_material', 'Drywall (Wood Stud)')
-                    )
-                    if detected_walls:
-                        new_floor.walls = detected_walls
-                        self.status_bar.showMessage(f"Detected {len(detected_walls)} walls.")
-                except Exception as e:
-                    self.status_bar.showMessage(f"Error detecting walls: {e}")
-                    print(f"Wall detection error: {e}")
-                finally:
-                     QApplication.restoreOverrideCursor()
+            detected_walls = data.get('detected_walls')
+            if detected_walls:
+                new_floor.walls = detected_walls
+                self.status_bar.showMessage(f"Added floor with {len(detected_walls)} detected walls.")
 
             self.project.add_floor(new_floor)
             self._add_tab_for_floor(new_floor)
