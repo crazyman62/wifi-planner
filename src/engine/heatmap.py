@@ -45,39 +45,29 @@ def generate_heatmap(
     target_freq = freq_map.get(frequency_band, 5200)
 
     # Coordinate grids
-    # We want the center of each grid cell.
-    # The grid starts at origin_offset.
-    # Cell (c, r) center is at origin_offset + (c*res + res/2, r*res + res/2)
-
     off_x, off_y = origin_offset
-
     x_coords = np.linspace(off_x + resolution/2, off_x + width - resolution/2, grid_w)
     y_coords = np.linspace(off_y + resolution/2, off_y + height - resolution/2, grid_h)
+
+    # Vectorized Grid
+    grid_x, grid_y = np.meshgrid(x_coords, y_coords)
 
     # Prepare Walls for faster access (Current Floor Only)
     processed_walls = []
     for w in walls:
         mat_name = w['material']
-        mat_info = materials_data.get(mat_name, {}) # This might need to look in 'materials' key if raw dict passed
-        # Handle if materials_data is the full dict
+        mat_info = materials_data.get(mat_name, {})
         if 'materials' in materials_data:
-            # Find in list
             found = next((m for m in materials_data['materials'] if m['name'] == mat_name), {})
             mat_info = found
 
-        # Fetch loss for specific band
         loss_dict = mat_info.get('loss', {})
         loss = loss_dict.get(frequency_band, loss_dict.get('5', 0.0))
         processed_walls.append((w['p1'], w['p2'], loss))
 
     # Prepare Floor Materials Attenuation Map
-    floor_loss_val = 15.0 # Default
-
-    # Better Implementation of Floor Loss inside the loop using passed config
-    # We need to map Z back to material.
     z_to_mat = {}
     if floors_config and floor_z_map:
-        # Assuming floor_z_map keys correspond to floors_config indices
         for idx, z in floor_z_map.items():
             if idx < len(floors_config):
                 z_to_mat[z] = floors_config[idx].material_name
@@ -91,15 +81,8 @@ def generate_heatmap(
         loss = 0.0
         min_z = min(z_start, z_end)
         max_z = max(z_start, z_end)
-
-        # Check against all known floor Z levels
-        # If a floor level Z is within (min_z, max_z], we add loss.
-        # The 'Floor 1' (Z=0) is usually base. We don't cross it unless going to -1.
-        # So we check if Z > min_z and Z <= max_z.
-
         for z_level, mat_name in z_to_mat.items():
             if min_z < z_level <= max_z:
-                # Add loss for this material
                 m_loss = floor_materials_lookup.get(mat_name, {}).get(frequency_band, 15.0)
                 loss += m_loss
         return loss
@@ -119,77 +102,108 @@ def generate_heatmap(
 
         ap_x, ap_y = ap['x'], ap['y']
         ap_z = ap.get('z', 0.0)
-
-        # Apply Zone Height / Ceiling Height Offset
-        # We need the floor index of this AP to lookup its ceiling/zones.
-        # The AP dict has 'z' which is slab level.
-        # But we also passed 'floor_z_map'. We can deduce index.
-        # Or easier: Pass 'ceiling_offset' in the AP dict from MainWindow?
-        # MainWindow knows the floor index of the AP and can lookup zones.
-        # Let's assume AP dict now has 'effective_z' or we calculate it here if we passed Zones?
-        # Passing zones for all floors is heavy.
-        # BETTER: Use 'z' as the *actual* 3D Z of the AP (Slab + Ceiling/Zone).
-        # We will update MainWindow to calculate this 'z' correctly before calling this function.
-
         effective_ap_z = ap_z
 
-        # Floor Loss is constant for this AP -> Target Floor pair
-        # (Assuming flat floors)
         f_loss = 0.0
         if floors_config and floor_z_map:
-            # We need the slab Z, not the AP Z (which might be suspended).
-            # We can find the closest floor Z below the AP Z?
-            # Or assume floor_z_map values are the slab Zs.
-            # MainWindow should pass 'slab_z' separately if needed, but using AP Z for range is approx OK
-            # as long as we don't cross a floor slab *within* the ceiling space (unlikely).
             f_loss = calculate_exact_floor_loss(effective_ap_z, target_z)
         else:
-            # Fallback if config missing
             f_loss = (abs(effective_ap_z - target_z) / 3.0) * 15.0
 
-        # Optimization: If f_loss is huge (e.g. > 100dB), skip
         if f_loss > 100:
             continue
 
-        # Vertical distance component squared
-        # Receiver is at target_z + 1.0m (User height) approx?
-        # Let's assume Receiver is at target_z + 1.0.
         receiver_z = target_z + 1.0
         dz_sq = (effective_ap_z - receiver_z) ** 2
 
-        # 2D Grid Loop
-        for r in range(grid_h):
-            for c in range(grid_w):
-                cell_x = x_coords[c]
-                cell_y = y_coords[r]
+        # --- Vectorized Calculations ---
+        dx = grid_x - ap_x
+        dy = grid_y - ap_y
+        dist_2d_px_sq = dx*dx + dy*dy
+        dist_2d_m = np.sqrt(dist_2d_px_sq) / ppm
+        dist_3d_m = np.sqrt(dist_2d_m**2 + dz_sq)
 
-                dx = cell_x - ap_x
-                dy = cell_y - ap_y
-                dist_2d_px_sq = dx*dx + dy*dy
-                dist_2d_m = np.sqrt(dist_2d_px_sq) / ppm
+        # Vectorized Wall Loss
+        current_wall_loss = np.zeros_like(grid_x)
 
-                # 3D Distance
-                dist_3d_m = np.sqrt(dist_2d_m**2 + dz_sq)
+        # We process walls in a python loop, but vectorize the pixel check for each wall.
+        # This keeps memory usage low compared to broadcasting (N_walls x H x W).
+        # AP is fixed (ap_x, ap_y).
 
-                # Wall Loss
-                current_wall_loss = 0.0
-                # Optim: dist check
-                if dist_2d_px_sq > 1:
-                    for w_p1, w_p2, w_loss in processed_walls:
-                         if segments_intersect((ap_x, ap_y), (cell_x, cell_y), w_p1, w_p2):
-                            current_wall_loss += w_loss
+        # For each wall: P1, P2.
+        # We need to check intersection of Segment(AP, Pixel) and Segment(P1, P2).
+        # We use cross products to determine relative orientation.
 
-                rssi = calculate_log_distance_path_loss(
-                    tx_power_dbm=tx_power,
-                    tx_gain_dbi=gain,
-                    frequency_mhz=freq,
-                    distance_meters=dist_3d_m,
-                    wall_loss_db=current_wall_loss,
-                    floor_loss_db=f_loss
-                )
+        # Helper: Cross Product of 2D vectors (Ax, Ay) and (Bx, By) is Ax*By - Ay*Bx
+        # d = (B - A) x (C - A)
 
-                if rssi > heatmap[r, c]:
-                    heatmap[r, c] = rssi
+        for w_p1, w_p2, w_loss in processed_walls:
+            w1x, w1y = w_p1
+            w2x, w2y = w_p2
+
+            # Vector W1->W2
+            v_wall_x = w2x - w1x
+            v_wall_y = w2y - w1y
+
+            # d1 = Direction(W1, W2, AP) = Cross(AP-W1, W2-W1)
+            # AP - W1
+            ap_w1_x = ap_x - w1x
+            ap_w1_y = ap_y - w1y
+
+            d1 = ap_w1_x * v_wall_y - ap_w1_y * v_wall_x
+
+            # d2 = Direction(W1, W2, Pixel) = Cross(Pixel-W1, W2-W1)
+            # Pixel - W1
+            pix_w1_x = grid_x - w1x
+            pix_w1_y = grid_y - w1y
+
+            d2 = pix_w1_x * v_wall_y - pix_w1_y * v_wall_x
+
+            # d3 = Direction(AP, Pixel, W1) = Cross(W1-AP, Pixel-AP)
+            # W1 - AP = - (AP - W1)
+            w1_ap_x = -ap_w1_x
+            w1_ap_y = -ap_w1_y
+
+            # Pixel - AP = (dx, dy) which we already computed
+            d3 = w1_ap_x * dy - w1_ap_y * dx
+
+            # d4 = Direction(AP, Pixel, W2) = Cross(W2-AP, Pixel-AP)
+            # W2 - AP
+            w2_ap_x = w2x - ap_x
+            w2_ap_y = w2y - ap_y
+
+            d4 = w2_ap_x * dy - w2_ap_y * dx
+
+            # Intersection Condition:
+            # ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) AND
+            # ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0))
+
+            # Vectorized condition:
+            # (d1 * d2 < 0) & (d3 * d4 < 0)
+            # Note: This is strict inequality, handles general crossing.
+            # It ignores collinear cases (d=0) which is fine for heatmap scale.
+
+            # We must be careful with d1 being scalar and d2 being array.
+            # d1*d2 < 0 checks signs differ.
+
+            cond1 = (d1 * d2) < 0
+            cond2 = (d3 * d4) < 0
+
+            mask = np.logical_and(cond1, cond2)
+
+            # Add loss where mask is True
+            current_wall_loss += (mask * w_loss)
+
+        # Vectorized RSSI Calculation
+        # FSPL
+        # dist_3d_m needs to be maxed with 0.1 to avoid log(0)
+        dist_safe = np.maximum(dist_3d_m, 0.1)
+        fspl = 20 * np.log10(dist_safe) + 20 * np.log10(freq) - 27.55
+
+        rssi_grid = tx_power + gain - fspl - current_wall_loss - f_loss
+
+        # Update Heatmap
+        heatmap = np.maximum(heatmap, rssi_grid)
 
     return heatmap
 
