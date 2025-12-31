@@ -267,6 +267,19 @@ class MainWindow(QMainWindow):
         # Settings
         self.btn_settings = QPushButton("Settings")
         self.btn_settings.clicked.connect(self.open_settings)
+        self.sidebar_layout.addSpacing(10)
+        self.sidebar_layout.addWidget(QLabel("<b>Properties</b>"))
+
+        self.zone_props_widget = QWidget()
+        zp_layout = QFormLayout(self.zone_props_widget)
+        self.spin_zone_height = QDoubleSpinBox()
+        self.spin_zone_height.setRange(0, 50)
+        self.spin_zone_height.setSuffix(" m")
+        self.spin_zone_height.valueChanged.connect(self.update_selected_zone_height)
+        zp_layout.addRow("Zone Height:", self.spin_zone_height)
+        self.sidebar_layout.addWidget(self.zone_props_widget)
+        self.zone_props_widget.hide()
+
         self.sidebar_layout.addWidget(self.btn_settings)
 
     def _create_top_toolbar(self):
@@ -946,10 +959,30 @@ class MainWindow(QMainWindow):
     def on_selection_changed(self):
         if not self.current_canvas: return
         selected = self.current_canvas.scene.selectedItems()
-        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
-            self.selected_item_start_pos = selected[0].pos()
+
+        self.zone_props_widget.hide()
+
+        if len(selected) == 1:
+            item = selected[0]
+            if isinstance(item, AccessPointItem):
+                self.selected_item_start_pos = item.pos()
+            elif isinstance(item, ZoneItem):
+                self.selected_item_start_pos = None
+                self.zone_props_widget.show()
+                self.spin_zone_height.blockSignals(True)
+                self.spin_zone_height.setValue(item.ceiling_height)
+                self.spin_zone_height.blockSignals(False)
+            else:
+                 self.selected_item_start_pos = None
         else:
             self.selected_item_start_pos = None
+
+    def update_selected_zone_height(self, val):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], ZoneItem):
+            selected[0].set_height(val)
+            self.trigger_heatmap()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Delete:
