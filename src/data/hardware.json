@@ -1,34 +1,387 @@
 {
     "access_points": [
         {
+            "model": "UniFi U7 Pro Max",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 7",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": "2x2" },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 23 },
+                "5": { "gain": 6.0, "max_tx_power": 29 },
+                "6": { "gain": 5.9, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "UniFi U7 Pro XG",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 7",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": "2x2" },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 23 },
+                "5": { "gain": 5.0, "max_tx_power": 26 },
+                "6": { "gain": 6.0, "max_tx_power": 24 }
+            }
+        },
+        {
             "model": "UniFi U7 Pro",
             "vendor": "Ubiquiti",
+            "generation": "WiFi 7",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": "2x2" },
             "bands": {
                 "2.4": { "gain": 4.0, "max_tx_power": 22 },
                 "5": { "gain": 6.0, "max_tx_power": 26 },
-                "6": { "gain": 5.8, "max_tx_power": 26 }
-            },
-            "default_tx_power": 20
+                "6": { "gain": 5.8, "max_tx_power": 23 }
+            }
         },
         {
-            "model": "UniFi E7 (Enterprise)",
+            "model": "UniFi U7 Pro Wall",
             "vendor": "Ubiquiti",
+            "generation": "WiFi 7",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": "2x2" },
             "bands": {
-                "2.4": { "gain": 5.0, "max_tx_power": 30 },
-                "5": { "gain": 6.0, "max_tx_power": 30 },
-                "6": { "gain": 6.0, "max_tx_power": 30 }
-            },
-            "default_tx_power": 24
+                "2.4": { "gain": 4.0, "max_tx_power": 22 },
+                "5": { "gain": 5.0, "max_tx_power": 26 },
+                "6": { "gain": 6.0, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "UniFi U7 In-Wall",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 7",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": "2x2" },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 22 },
+                "5": { "gain": 8.0, "max_tx_power": 24 },
+                "6": { "gain": 5.0, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "UniFi U7 Lite",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 7",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": null },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 23 },
+                "5": { "gain": 6.0, "max_tx_power": 24 }
+            }
+        },
+        {
+            "model": "UniFi U7 Outdoor",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 7",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": "2x2" },
+            "bands": {
+                "2.4": { "gain": 8.0, "max_tx_power": 23 },
+                "5": { "gain": 11.0, "max_tx_power": 26 },
+                "6": { "gain": 10.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "UniFi U6 Enterprise",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 6E",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": "4x4" },
+            "bands": {
+                "2.4": { "gain": 3.2, "max_tx_power": 22 },
+                "5": { "gain": 5.3, "max_tx_power": 26 },
+                "6": { "gain": 6.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "UniFi U6 Enterprise IW",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 6E",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": "4x4" },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 22 },
+                "5": { "gain": 5.8, "max_tx_power": 26 },
+                "6": { "gain": 5.8, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "UniFi U6 Pro",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 22 },
+                "5": { "gain": 6.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "UniFi U6 LR",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "4x4", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 26 },
+                "5": { "gain": 5.5, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "UniFi U6+",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 23 },
+                "5": { "gain": 5.4, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "UniFi U6 Lite",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": null },
+            "bands": {
+                "2.4": { "gain": 2.8, "max_tx_power": 23 },
+                "5": { "gain": 3.0, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "UniFi U6 Mesh",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 22 },
+                "5": { "gain": 5.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "UniFi AC Pro",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "3x3", "5": "3x3", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 22 },
+                "5": { "gain": 3.0, "max_tx_power": 22 }
+            }
+        },
+        {
+            "model": "UniFi NanoHD",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 2.8, "max_tx_power": 23 },
+                "5": { "gain": 3.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "UniFi FlexHD",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 1.6, "max_tx_power": 23 },
+                "5": { "gain": 4.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "UniFi AC LR",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "3x3", "5": "2x2", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 24 },
+                "5": { "gain": 3.0, "max_tx_power": 22 }
+            }
+        },
+        {
+            "model": "UniFi AC Lite",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 20 },
+                "5": { "gain": 3.0, "max_tx_power": 20 }
+            }
+        },
+        {
+            "model": "UniFi AC Mesh",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 20 },
+                "5": { "gain": 4.0, "max_tx_power": 20 }
+            }
+        },
+        {
+            "model": "UniFi AC Mesh Pro",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "3x3", "5": "3x3", "6": null },
+            "bands": {
+                "2.4": { "gain": 8.0, "max_tx_power": 22 },
+                "5": { "gain": 8.0, "max_tx_power": 22 }
+            }
+        },
+        {
+            "model": "UniFi IW-HD",
+            "vendor": "Ubiquiti",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 2.0, "max_tx_power": 23 },
+                "5": { "gain": 3.4, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "Meraki CW9178",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 7",
+            "mimo": { "2.4": "4x4", "5": "8x8", "6": "4x4" },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 23 },
+                "5": { "gain": 5.0, "max_tx_power": 23 },
+                "6": { "gain": 6.0, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "Meraki CW9176",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 7",
+            "mimo": { "2.4": "4x4", "5": "4x4", "6": "4x4" },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 23 },
+                "5": { "gain": 5.0, "max_tx_power": 23 },
+                "6": { "gain": 6.0, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "Meraki CW9166",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 6E",
+            "mimo": { "2.4": "4x4", "5": "4x4", "6": "4x4" },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 23 },
+                "5": { "gain": 5.0, "max_tx_power": 23 },
+                "6": { "gain": 4.0, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "Meraki CW9164",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 6E",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": "4x4" },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 23 },
+                "5": { "gain": 5.0, "max_tx_power": 26 },
+                "6": { "gain": 6.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "Meraki CW9162",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 6E",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": "2x2" },
+            "bands": {
+                "2.4": { "gain": 3.2, "max_tx_power": 23 },
+                "5": { "gain": 4.7, "max_tx_power": 23 },
+                "6": { "gain": 4.5, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "Meraki MR56",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "4x4", "5": "8x8", "6": null },
+            "bands": {
+                "2.4": { "gain": 5.4, "max_tx_power": 26 },
+                "5": { "gain": 6.0, "max_tx_power": 26 }
+            }
         },
         {
             "model": "Meraki MR46",
             "vendor": "Cisco Meraki",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "4x4", "5": "4x4", "6": null },
             "bands": {
                 "2.4": { "gain": 5.4, "max_tx_power": 26 },
-                "5": { "gain": 6.0, "max_tx_power": 26 },
-                "6": null
-            },
-            "default_tx_power": 23
+                "5": { "gain": 6.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "Meraki MR44",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "2x2", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 5.1, "max_tx_power": 23 },
+                "5": { "gain": 5.9, "max_tx_power": 23 }
+            }
+        },
+        {
+            "model": "Meraki MR36",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": null },
+            "bands": {
+                "2.4": { "gain": 4.0, "max_tx_power": 22 },
+                "5": { "gain": 5.0, "max_tx_power": 22 }
+            }
+        },
+        {
+            "model": "Meraki MR76",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": null },
+            "bands": {
+                "2.4": { "gain": 5.0, "max_tx_power": 20 },
+                "5": { "gain": 7.0, "max_tx_power": 20 }
+            }
+        },
+        {
+            "model": "Meraki MR86",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 6",
+            "mimo": { "2.4": "4x4", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 5.0, "max_tx_power": 25 },
+                "5": { "gain": 7.0, "max_tx_power": 24 }
+            }
+        },
+        {
+            "model": "Meraki MR53",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "4x4", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 26 },
+                "5": { "gain": 5.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "Meraki MR52",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "4x4", "5": "4x4", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 20 },
+                "5": { "gain": 5.0, "max_tx_power": 26 }
+            }
+        },
+        {
+            "model": "Meraki MR42",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "3x3", "5": "3x3", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.0, "max_tx_power": 20 },
+                "5": { "gain": 5.0, "max_tx_power": 20 }
+            }
+        },
+        {
+            "model": "Meraki MR33",
+            "vendor": "Cisco Meraki",
+            "generation": "WiFi 5",
+            "mimo": { "2.4": "2x2", "5": "2x2", "6": null },
+            "bands": {
+                "2.4": { "gain": 3.8, "max_tx_power": 20 },
+                "5": { "gain": 3.9, "max_tx_power": 20 }
+            }
         }
     ]
 }
