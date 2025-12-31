@@ -127,6 +127,10 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self.open_project)
         file_menu.addAction(open_action)
 
+        export_action = QAction("Export Report (PDF)", self)
+        export_action.triggered.connect(self.export_report)
+        file_menu.addAction(export_action)
+
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -245,6 +249,7 @@ class MainWindow(QMainWindow):
         self.combo_band = QComboBox()
         self.combo_band.addItems(["2.4", "5", "6"])
         self.combo_band.setCurrentText("5")
+        self.combo_band.currentIndexChanged.connect(self.trigger_heatmap)
         self.sidebar_layout.addWidget(self.combo_band)
 
         self.sidebar_layout.addStretch()
@@ -1052,6 +1057,112 @@ class MainWindow(QMainWindow):
             self.project.heatmap_min_dbm = v[0]
             self.project.heatmap_max_dbm = v[1]
             self.project.snap_threshold = v[2]
+
+    def export_report(self):
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export PDF Report", "report.pdf", "PDF Files (*.pdf)")
+        if not file_path:
+            return
+
+        self.status_bar.showMessage("Generating Report... Please wait.")
+        QApplication.processEvents()
+
+        original_tab_idx = self.tabs.currentIndex()
+        original_band_idx = self.combo_band.currentIndex()
+
+        floors_data = []
+        bom_aps = []
+
+        try:
+            # Collect Data
+            for i, floor in enumerate(self.project.floors):
+                # Sync current state to floor object (if currently active tab)
+                if i == original_tab_idx:
+                     self._sync_canvas_to_floor(self.current_canvas, floor)
+
+                # Switch tab to ensure canvas exists and is sized correctly?
+                # Ideally we render off-screen, but using the visible canvas is easier for maintaining state/transforms.
+                self.tabs.setCurrentIndex(i)
+                canvas = self.current_canvas
+                QApplication.processEvents()
+
+                floor_entry = {
+                    'name': floor.name,
+                    'bands': []
+                }
+
+                # BOM Collection
+                # We need to make sure floor.access_points is up to date.
+                # If we just switched tabs, _populate_canvas_items put items in scene.
+                # But _sync_canvas_to_floor puts them back in floor object.
+                # Let's read from the Scene items for BOM to be sure.
+                for item in canvas.scene.items():
+                    if isinstance(item, AccessPointItem):
+                        bom_aps.append({
+                            'name': item.name,
+                            'model': item.model_name,
+                            'floor_name': floor.name
+                        })
+
+                # Generate Bands
+                for band in ["2.4", "5", "6"]:
+                    self.combo_band.blockSignals(True)
+                    self.combo_band.setCurrentText(band)
+                    self.combo_band.blockSignals(False)
+
+                    self.trigger_heatmap()
+                    QApplication.processEvents() # Process events to ensure update
+
+                    # Capture Image
+                    # Render the whole scene (or itemsBoundingRect?)
+                    # itemsBoundingRect might include ghost or negative space.
+                    # We should align with what the user sees or the image rect.
+                    # Ideally, use the Heatmap Rect or Image Rect.
+                    # Since we added Bleed, itemsBoundingRect is large.
+                    # Let's use itemsBoundingRect.
+
+                    rect = canvas.scene.itemsBoundingRect()
+                    if rect.width() > 0 and rect.height() > 0:
+                        image = QImage(int(rect.width()), int(rect.height()), QImage.Format_ARGB32)
+                        image.fill(Qt.white) # Background
+
+                        painter = QPainter(image)
+                        painter.setRenderHint(QPainter.Antialiasing)
+                        # Translate painter so rect.topLeft is at (0,0)
+                        painter.translate(-rect.x(), -rect.y())
+                        canvas.scene.render(painter, target=QRectF(0, 0, rect.width(), rect.height()), source=rect)
+                        painter.end()
+
+                        img_path = f"temp_f{i}_{band}.png"
+                        image.save(img_path)
+                        floor_entry['bands'].append({'band': band, 'image_path': img_path})
+
+                floors_data.append(floor_entry)
+
+            # Generate PDF
+            report_gen = PDFReport(file_path)
+            report_gen.generate_report(
+                project_name="My Project", # Could prompt or store in Project
+                floors_data=floors_data,
+                access_points=bom_aps,
+                min_dbm=self.project.heatmap_min_dbm,
+                max_dbm=self.project.heatmap_max_dbm
+            )
+
+            # Cleanup
+            for floor in floors_data:
+                for band_data in floor['bands']:
+                    if os.path.exists(band_data['image_path']):
+                        os.remove(band_data['image_path'])
+
+            self.status_bar.showMessage(f"Report saved to {file_path}")
+
+        except Exception as e:
+            self.status_bar.showMessage(f"Error exporting report: {e}")
+            print(f"Export Error: {e}")
+        finally:
+            # Restore state
+            self.tabs.setCurrentIndex(original_tab_idx)
+            self.combo_band.setCurrentIndex(original_band_idx)
 
 def main():
     app = QApplication(sys.argv)
