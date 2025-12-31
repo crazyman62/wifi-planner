@@ -159,6 +159,7 @@ class MainWindow(QMainWindow):
         self.btn_edit_nodes = QPushButton("Edit Wall Nodes") # New
         self.btn_draw_zone = QPushButton("Draw Ceiling Zone") # New
         self.btn_add_ap = QPushButton("Add AP")
+        self.btn_move_floor = QPushButton("Move Floor Plan") # New
 
         self.btn_select.clicked.connect(lambda: self.set_mode("SELECT"))
         self.btn_calibrate.clicked.connect(lambda: self.set_mode("CALIBRATE"))
@@ -166,6 +167,7 @@ class MainWindow(QMainWindow):
         self.btn_edit_nodes.clicked.connect(lambda: self.set_mode("EDIT_NODES"))
         self.btn_draw_zone.clicked.connect(lambda: self.set_mode("DRAW_ZONE"))
         self.btn_add_ap.clicked.connect(lambda: self.set_mode("ADD_AP"))
+        self.btn_move_floor.clicked.connect(lambda: self.set_mode("MOVE_FLOOR"))
 
         self.sidebar_layout.addWidget(self.btn_select)
         self.sidebar_layout.addWidget(self.btn_calibrate)
@@ -173,6 +175,7 @@ class MainWindow(QMainWindow):
         self.sidebar_layout.addWidget(self.btn_edit_nodes)
         self.sidebar_layout.addWidget(self.btn_draw_zone)
         self.sidebar_layout.addWidget(self.btn_add_ap)
+        self.sidebar_layout.addWidget(self.btn_move_floor)
 
         self.lbl_ppm = QLabel("Scale: Not Calibrated")
         self.sidebar_layout.addWidget(self.lbl_ppm)
@@ -183,13 +186,13 @@ class MainWindow(QMainWindow):
 
         align_layout = QVBoxLayout()
         self.spin_x = QDoubleSpinBox()
-        self.spin_x.setRange(-5000, 5000)
+        self.spin_x.setRange(-100000, 100000)
         self.spin_x.setPrefix("X: ")
         self.spin_x.valueChanged.connect(self.update_floor_transform)
         align_layout.addWidget(self.spin_x)
 
         self.spin_y = QDoubleSpinBox()
-        self.spin_y.setRange(-5000, 5000)
+        self.spin_y.setRange(-100000, 100000)
         self.spin_y.setPrefix("Y: ")
         self.spin_y.valueChanged.connect(self.update_floor_transform)
         align_layout.addWidget(self.spin_y)
@@ -793,6 +796,23 @@ class MainWindow(QMainWindow):
             self.temp_rect_item.setRect(rect)
 
     def handle_canvas_release(self, point):
+        # Handle Move Floor Plan
+        if self.current_mode == "MOVE_FLOOR" and self.current_canvas and self.current_canvas.pixmap_item:
+            # Sync position back to UI and Object
+            pos = self.current_canvas.pixmap_item.pos()
+            # Avoid triggering updates while setting values
+            self.blockSignals(True)
+            self.spin_x.setValue(pos.x())
+            self.spin_y.setValue(pos.y())
+            self.blockSignals(False)
+
+            # Update Object (since we blocked signals)
+            self.current_floor.x_offset = pos.x()
+            self.current_floor.y_offset = pos.y()
+
+            self.trigger_heatmap()
+            return
+
         # Handle Move AP
         scene = self.current_canvas.scene
         selected = scene.selectedItems()
@@ -1069,6 +1089,16 @@ class MainWindow(QMainWindow):
         original_tab_idx = self.tabs.currentIndex()
         original_band_idx = self.combo_band.currentIndex()
 
+        # Temporarily disable Ghost Floor to ensure clean capture
+        was_ghost_checked = self.chk_ghost.isChecked()
+        if was_ghost_checked:
+            self.chk_ghost.setChecked(False)
+            # Ensure current ghost is removed immediately
+            for idx in range(self.tabs.count()):
+                w = self.tabs.widget(idx)
+                if isinstance(w, PlanCanvas):
+                    w.set_ghost_image(None)
+
         floors_data = []
         bom_aps = []
 
@@ -1127,8 +1157,7 @@ class MainWindow(QMainWindow):
 
                         painter = QPainter(image)
                         painter.setRenderHint(QPainter.Antialiasing)
-                        # Translate painter so rect.topLeft is at (0,0)
-                        painter.translate(-rect.x(), -rect.y())
+                        # Direct render without manual translation (source rect handles it)
                         canvas.scene.render(painter, target=QRectF(0, 0, rect.width(), rect.height()), source=rect)
                         painter.end()
 
@@ -1163,6 +1192,12 @@ class MainWindow(QMainWindow):
             # Restore state
             self.tabs.setCurrentIndex(original_tab_idx)
             self.combo_band.setCurrentIndex(original_band_idx)
+            if was_ghost_checked:
+                self.chk_ghost.setChecked(True)
+                # self.update_ghost_view() will be called by on_tab_changed logic if we switch tabs?
+                # We switched back to original_tab_idx.
+                # on_tab_changed -> update_ghost_view if checked.
+                # So ghost should reappear.
 
 def main():
     app = QApplication(sys.argv)

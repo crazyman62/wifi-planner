@@ -27,7 +27,7 @@ class PlanCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.NoDrag) # We will implement custom drag if needed, or use ScrollHandDrag
         self._is_panning = False
         self._pan_start = QPointF(0, 0)
-        self.mode = "SELECT" # Track current mode to decide on left-click behavior
+        self._mode = "SELECT"
 
         self.pixmap_item = None
         self.ghost_pixmap_item = None
@@ -75,7 +75,26 @@ class PlanCanvas(QGraphicsView):
 
         # Set scene rect to include the image
         self.setSceneRect(self.pixmap_item.sceneBoundingRect())
+
+        # Apply current mode flags
+        self.mode = self._mode
+
         return True
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, value):
+        self._mode = value
+        if self.pixmap_item:
+            if value == "MOVE_FLOOR":
+                self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, True)
+                self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, True)
+            else:
+                self.pixmap_item.setFlag(QGraphicsItem.ItemIsMovable, False)
+                self.pixmap_item.setFlag(QGraphicsItem.ItemIsSelectable, False)
 
     def set_ghost_image(self, image_path, x_offset=0, y_offset=0, rotation=0, scale_factor=1.0):
         """
