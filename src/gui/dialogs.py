@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox, QMessageBox, QComboBox, QPushButton, QFileDialog
-from PySide6.QtWidgets import QSpinBox, QFormLayout, QDoubleSpinBox
+from PySide6.QtWidgets import QSpinBox, QFormLayout, QDoubleSpinBox, QGroupBox, QCheckBox
 import os
 
 class CalibrationDialog(QDialog):
@@ -81,13 +81,15 @@ class SettingsDialog(QDialog):
 
 
 class AddFloorDialog(QDialog):
-    def __init__(self, floor_materials, parent=None, initial_data=None):
+    def __init__(self, floor_materials, wall_materials=None, parent=None, initial_data=None):
         super().__init__(parent)
         self.setWindowTitle("Floor Configuration")
         self.resize(400, 300)
 
         self.image_path = None
         self.is_edit_mode = initial_data is not None
+        if wall_materials is None:
+            wall_materials = []
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -123,6 +125,21 @@ class AddFloorDialog(QDialog):
         layout.addWidget(self.btn_image)
         layout.addWidget(self.lbl_image_status)
 
+        # Auto-detect Walls
+        self.grp_autodetect = QGroupBox("Auto-Detect Walls")
+        self.grp_autodetect.setCheckable(True)
+        self.grp_autodetect.setChecked(False)
+        auto_layout = QFormLayout(self.grp_autodetect)
+
+        self.combo_inner_mat = QComboBox()
+        self.combo_inner_mat.addItems(wall_materials)
+        if wall_materials:
+             # Default to something reasonable if available, or just first
+             pass
+        auto_layout.addRow("Inner Wall Material:", self.combo_inner_mat)
+
+        layout.addWidget(self.grp_autodetect)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.validate_and_accept)
         buttons.rejected.connect(self.reject)
@@ -143,6 +160,9 @@ class AddFloorDialog(QDialog):
             else:
                 self.lbl_image_status.setText("No image set")
 
+            # Disable autodetect by default on edit
+            self.grp_autodetect.setChecked(False)
+
     def select_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open Floor Plan", "", "Images (*.png *.jpg *.jpeg *.bmp)"
@@ -156,10 +176,6 @@ class AddFloorDialog(QDialog):
             QMessageBox.warning(self, "Input Error", "Please provide a floor name.")
             return
         if not self.image_path and not self.is_edit_mode:
-            # Require image for new floors, optional for edit (implies keeping existing?)
-            # Actually if edit mode and image_path is None, it means no image on floor?
-            # Or if user cleared it.
-            # Let's enforce image for new floors.
             QMessageBox.warning(self, "Input Error", "Please select a floor plan image.")
             return
 
@@ -171,5 +187,7 @@ class AddFloorDialog(QDialog):
             'number': self.spin_number.value(),
             'material': self.combo_material.currentText(),
             'ceiling_height': self.spin_ceiling.value(),
-            'image_path': self.image_path
+            'image_path': self.image_path,
+            'auto_detect': self.grp_autodetect.isChecked(),
+            'inner_material': self.combo_inner_mat.currentText()
         }

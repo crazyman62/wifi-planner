@@ -18,6 +18,7 @@ from src.engine.project import Project, Floor
 from src.utils.file_io import save_project, load_project
 from src.utils.command_invoker import UndoStack, AddWallCommand, AddAPCommand, DeleteCommand, MoveCommand
 from src.utils.report_generator import PDFReport
+from src.utils.vision import detect_walls
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -41,10 +42,22 @@ class MainWindow(QMainWindow):
         sidebar_widget = QWidget()
         self.sidebar_layout = QVBoxLayout(sidebar_widget)
 
+        # Top Toolbar
+        self.top_toolbar_widget = QWidget()
+        self.top_toolbar_layout = QHBoxLayout(self.top_toolbar_widget)
+        self.top_toolbar_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Right Side (Toolbar + Tabs)
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(self.top_toolbar_widget)
+        right_layout.addWidget(self.tabs)
+
         container = QWidget()
         main_layout = QHBoxLayout(container)
         main_layout.addWidget(sidebar_widget, stretch=1)
-        main_layout.addWidget(self.tabs, stretch=5)
+        main_layout.addWidget(right_widget, stretch=5)
         self.setCentralWidget(container)
 
         # State
@@ -65,6 +78,7 @@ class MainWindow(QMainWindow):
         # Build UI
         self._create_menus()
         self._create_sidebar()
+        self._create_top_toolbar()
         self._create_statusbar()
 
         # Canvas Event Handling State
@@ -249,36 +263,42 @@ class MainWindow(QMainWindow):
 
         self.sidebar_layout.addLayout(align_layout)
 
-        # Wall Material
-        self.sidebar_layout.addSpacing(10)
-        self.sidebar_layout.addWidget(QLabel("<b>Wall Material</b>"))
-        self.combo_materials = QComboBox()
-        # Parse material names from complex structure
-        wall_mats = self.materials_data.get('materials', [])
-        self.combo_materials.addItems([m['name'] for m in wall_mats])
-        self.sidebar_layout.addWidget(self.combo_materials)
-
-        # AP Selection
-        self.sidebar_layout.addWidget(QLabel("<b>AP Model</b>"))
-        self.combo_aps = QComboBox()
-        if self.hardware_data:
-            self.combo_aps.addItems(list(self.hardware_data.keys()))
-        self.sidebar_layout.addWidget(self.combo_aps)
-
-        # Band Selection
-        self.sidebar_layout.addWidget(QLabel("<b>Frequency Band</b>"))
-        self.combo_band = QComboBox()
-        self.combo_band.addItems(["2.4", "5", "6"])
-        self.combo_band.setCurrentText("5")
-        self.combo_band.currentIndexChanged.connect(self.trigger_heatmap)
-        self.sidebar_layout.addWidget(self.combo_band)
-
         self.sidebar_layout.addStretch()
 
         # Settings
         self.btn_settings = QPushButton("Settings")
         self.btn_settings.clicked.connect(self.open_settings)
         self.sidebar_layout.addWidget(self.btn_settings)
+
+    def _create_top_toolbar(self):
+        # Wall Material
+        self.top_toolbar_layout.addWidget(QLabel("<b>Wall Material:</b>"))
+        self.combo_materials = QComboBox()
+        # Parse material names from complex structure
+        wall_mats = self.materials_data.get('materials', [])
+        self.combo_materials.addItems([m['name'] for m in wall_mats])
+        self.top_toolbar_layout.addWidget(self.combo_materials)
+
+        self.top_toolbar_layout.addSpacing(20)
+
+        # AP Selection
+        self.top_toolbar_layout.addWidget(QLabel("<b>AP Model:</b>"))
+        self.combo_aps = QComboBox()
+        if self.hardware_data:
+            self.combo_aps.addItems(list(self.hardware_data.keys()))
+        self.top_toolbar_layout.addWidget(self.combo_aps)
+
+        self.top_toolbar_layout.addSpacing(20)
+
+        # Band Selection
+        self.top_toolbar_layout.addWidget(QLabel("<b>Frequency Band:</b>"))
+        self.combo_band = QComboBox()
+        self.combo_band.addItems(["2.4", "5", "6"])
+        self.combo_band.setCurrentText("5")
+        self.combo_band.currentIndexChanged.connect(self.trigger_heatmap)
+        self.top_toolbar_layout.addWidget(self.combo_band)
+
+        self.top_toolbar_layout.addStretch()
 
     def _create_statusbar(self):
         self.status_bar = QStatusBar()
@@ -306,7 +326,9 @@ class MainWindow(QMainWindow):
         if not floor: return
 
         initial_data = floor.to_dict()
-        dialog = AddFloorDialog(self.floor_material_names, self, initial_data=initial_data)
+        wall_mats = self.materials_data.get('materials', [])
+        wall_mat_names = [m['name'] for m in wall_mats]
+        dialog = AddFloorDialog(self.floor_material_names, wall_mat_names, self, initial_data=initial_data)
 
         if dialog.exec():
             data = dialog.get_data()
@@ -330,6 +352,21 @@ class MainWindow(QMainWindow):
 
                     # Clear Scene Items (except background which load_image handles, but we need to clear walls/aps)
                     canvas.scene.clear()
+
+                    # Auto-Detect on Edit if requested
+                    if data.get('auto_detect'):
+                        detected_walls = detect_walls(
+                            floor.image_path,
+                            "Concrete (Standard 4\")",
+                            data.get('inner_material', 'Drywall (Wood Stud)')
+                        )
+                        if detected_walls:
+                            # Replace walls or Append? Usually replace if detecting from scratch.
+                            # But maybe we want to keep existing?
+                            # Prompt implies "when i upload... it should select default walls".
+                            # If I'm replacing the image, I probably want new walls.
+                            floor.walls = detected_walls
+                            self.status_bar.showMessage(f"Detected {len(detected_walls)} walls.")
 
                     # Reload Image
                     canvas.load_image(floor.image_path,
@@ -401,7 +438,9 @@ class MainWindow(QMainWindow):
             self.trigger_heatmap()
 
     def show_add_floor_dialog(self):
-        dialog = AddFloorDialog(self.floor_material_names, self)
+        wall_mats = self.materials_data.get('materials', [])
+        wall_mat_names = [m['name'] for m in wall_mats]
+        dialog = AddFloorDialog(self.floor_material_names, wall_mat_names, self)
         if dialog.exec():
             data = dialog.get_data()
             new_floor = Floor(
@@ -411,6 +450,26 @@ class MainWindow(QMainWindow):
                 image_path=data['image_path']
             )
             new_floor.ceiling_height = data['ceiling_height']
+
+            # Auto-Detect Walls
+            if data.get('auto_detect') and new_floor.image_path:
+                self.status_bar.showMessage("Detecting walls...")
+                QApplication.setOverrideCursor(Qt.WaitCursor)
+                QApplication.processEvents()
+                try:
+                    detected_walls = detect_walls(
+                        new_floor.image_path,
+                        "Concrete (Standard 4\")",
+                        data.get('inner_material', 'Drywall (Wood Stud)')
+                    )
+                    if detected_walls:
+                        new_floor.walls = detected_walls
+                        self.status_bar.showMessage(f"Detected {len(detected_walls)} walls.")
+                except Exception as e:
+                    self.status_bar.showMessage(f"Error detecting walls: {e}")
+                    print(f"Wall detection error: {e}")
+                finally:
+                     QApplication.restoreOverrideCursor()
 
             self.project.add_floor(new_floor)
             self._add_tab_for_floor(new_floor)
