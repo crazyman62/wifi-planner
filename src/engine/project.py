@@ -67,7 +67,7 @@ class Project:
         self.active_floor_index = -1
 
         # Global Settings
-        self.snap_threshold = 15
+        self.snap_threshold = 5
         self.heatmap_min_dbm = -85
         self.heatmap_max_dbm = -30
         self.next_ap_id = 1

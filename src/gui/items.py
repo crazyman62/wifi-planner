@@ -13,14 +13,13 @@ class WallNodeItem(QGraphicsEllipseItem):
         self.setPen(QPen(Qt.white))
         self.setFlags(QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemSendsGeometryChanges)
         self.setZValue(5) # Above walls
+        self.walls = []
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange:
-            # We need to update connected walls
-            # But we don't know them directly unless we store references or parent observes.
-            # Best practice: Signal or callback? QGraphicsItems don't have signals.
-            # We can rely on Scene to handle this, or store list of connected walls.
-            pass
+            # Update connected walls
+            for wall in self.walls:
+                wall.update_positions()
         return super().itemChange(change, value)
 
 

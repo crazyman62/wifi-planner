@@ -488,18 +488,27 @@ class MainWindow(QMainWindow):
                 self.current_canvas.mode = self.current_mode
 
             # Update UI controls for this floor
-            self.blockSignals(True) # Prevent feedback loops
+            # Block signals on individual controls to prevent update_floor_transform from firing
+            # and overwriting the new floor with old values or vice versa during the switch.
+            self.spin_x.blockSignals(True)
+            self.spin_y.blockSignals(True)
+            self.spin_rot.blockSignals(True)
+            self.spin_scale.blockSignals(True)
+
             self.spin_x.setValue(floor.x_offset)
             self.spin_y.setValue(floor.y_offset)
             self.spin_rot.setValue(floor.rotation)
             self.spin_scale.setValue(floor.scale_factor)
 
+            self.spin_x.blockSignals(False)
+            self.spin_y.blockSignals(False)
+            self.spin_rot.blockSignals(False)
+            self.spin_scale.blockSignals(False)
+
             if floor.pixels_per_meter:
                 self.lbl_ppm.setText(f"Scale: {floor.pixels_per_meter:.2f} px/m")
             else:
                 self.lbl_ppm.setText("Scale: Not Calibrated")
-
-            self.blockSignals(False)
 
             # If Ghost Mode is on, update it
             if self.chk_ghost.isChecked():
@@ -534,6 +543,7 @@ class MainWindow(QMainWindow):
         else:
             if self.current_canvas:
                 self.current_canvas.set_ghost_image(None)
+                self.current_canvas.set_active_layer_opacity(1.0)
 
     def update_ghost_view(self, current_idx):
         if current_idx > 0:
@@ -547,9 +557,11 @@ class MainWindow(QMainWindow):
                     target_floor.rotation,
                     target_floor.scale_factor
                 )
+                self.current_canvas.set_active_layer_opacity(0.6)
         else:
             self.status_bar.showMessage("No floor below to display.")
             self.current_canvas.set_ghost_image(None)
+            self.current_canvas.set_active_layer_opacity(1.0)
 
     # --- Mode & Canvas Interaction ---
 
@@ -639,6 +651,11 @@ class MainWindow(QMainWindow):
             # Link wall to nodes
             w.start_node = node1
             w.end_node = node2
+
+            if w not in node1.walls:
+                node1.walls.append(w)
+            if w not in node2.walls:
+                node2.walls.append(w)
 
     def clear_wall_nodes(self):
         for node in self.active_wall_nodes:

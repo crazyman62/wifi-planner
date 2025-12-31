@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsItem
 from PySide6.QtGui import QPixmap, QPainter, QPen, QColor, QWheelEvent
 from PySide6.QtCore import Qt, Signal, QPointF
+from src.gui.items import WallItem, AccessPointItem
 
 class PlanCanvas(QGraphicsView):
     """
@@ -98,7 +99,7 @@ class PlanCanvas(QGraphicsView):
 
     def set_ghost_image(self, image_path, x_offset=0, y_offset=0, rotation=0, scale_factor=1.0):
         """
-        Sets a semi-transparent 'ghost' image of another floor (e.g. floor below).
+        Sets a 'ghost' image of another floor (e.g. floor below).
         """
         if self.ghost_pixmap_item:
             self.scene.removeItem(self.ghost_pixmap_item)
@@ -118,13 +119,24 @@ class PlanCanvas(QGraphicsView):
         cy = pixmap.height() / 2
         self.ghost_pixmap_item.setTransformOriginPoint(cx, cy)
 
-        self.ghost_pixmap_item.setOpacity(0.3)
+        self.ghost_pixmap_item.setOpacity(1.0) # Solid as requested
         self.ghost_pixmap_item.setScale(scale_factor)
         self.ghost_pixmap_item.setRotation(rotation)
         self.ghost_pixmap_item.setPos(x_offset, y_offset)
         self.ghost_pixmap_item.setZValue(-101) # Below the current floor map
 
         self.scene.addItem(self.ghost_pixmap_item)
+
+    def set_active_layer_opacity(self, opacity):
+        """
+        Sets the opacity of the active floor elements (Image, Walls, APs).
+        """
+        if self.pixmap_item:
+            self.pixmap_item.setOpacity(opacity)
+
+        for item in self.scene.items():
+            if isinstance(item, (WallItem, AccessPointItem)):
+                item.setOpacity(opacity)
 
     def update_image_transform(self, x, y, rotation, scale):
         if self.pixmap_item:
