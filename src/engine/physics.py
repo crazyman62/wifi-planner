@@ -5,30 +5,29 @@ def calculate_log_distance_path_loss(
     tx_gain_dbi: float,
     frequency_mhz: float,
     distance_meters: float,
-    wall_loss_db: float = 0.0
+    wall_loss_db: float = 0.0,
+    floor_loss_db: float = 0.0
 ) -> float:
     """
     Calculates RSSI using the Log-Distance Path Loss Model.
-    Formula: RSSI = P_tx + G_tx - (20log10(d) + 20log10(f) - 27.55) - L_walls
+    Formula: RSSI = P_tx + G_tx - FSPL - L_walls - L_floors
 
     :param tx_power_dbm: Transmit power in dBm
     :param tx_gain_dbi: Antenna gain in dBi
     :param frequency_mhz: Frequency in MHz
-    :param distance_meters: Distance in meters
+    :param distance_meters: 3D Distance in meters
     :param wall_loss_db: Cumulative wall loss in dB
+    :param floor_loss_db: Cumulative floor penetration loss in dB
     :return: RSSI in dBm
     """
     if distance_meters <= 0:
-        # Avoid log10(0) or negative distance logic errors.
-        # In a real grid, this might happen at the exact AP location.
-        # We can clamp to a small epsilon distance (e.g. 1cm or 10cm).
         distance_meters = 0.1
 
     # Free Space Path Loss (FSPL) in dB
     # FSPL = 20log10(d) + 20log10(f) - 27.55 (constant for meters and MHz)
     fspl = 20 * np.log10(distance_meters) + 20 * np.log10(frequency_mhz) - 27.55
 
-    rssi = tx_power_dbm + tx_gain_dbi - fspl - wall_loss_db
+    rssi = tx_power_dbm + tx_gain_dbi - fspl - wall_loss_db - floor_loss_db
     return rssi
 
 def segments_intersect(p1, p2, p3, p4):
