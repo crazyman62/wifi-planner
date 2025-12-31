@@ -89,11 +89,11 @@ def detect_walls(image_path, outer_material_name, inner_material_name, sensitivi
                 'material': outer_material_name
             })
 
-    # 5. Inner Walls (Edges of Clean Mask)
-    # Canny on the cleaned mask to get edges
-    edges = cv2.Canny(cleaned_mask, 50, 150)
+    # 5. Inner Walls (Centerlines of Clean Mask)
+    # Use Skeletonization to find the center line of walls
+    skeleton = skeletonize(cleaned_mask)
 
-    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=hough_thresh, minLineLength=min_line_len, maxLineGap=10)
+    lines = cv2.HoughLinesP(skeleton, 1, np.pi / 180, threshold=hough_thresh, minLineLength=min_line_len, maxLineGap=10)
 
     if lines is not None:
         for line in lines:
@@ -130,6 +130,30 @@ def detect_walls(image_path, outer_material_name, inner_material_name, sensitivi
                 })
 
     return walls
+
+def skeletonize(img):
+    """
+    Morphological skeletonization (iterative thinning).
+    img: Binary image (0, 255)
+    """
+    size = np.size(img)
+    skel = np.zeros(img.shape, np.uint8)
+
+    element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3,3))
+    temp_img = img.copy()
+
+    # Safety limit
+    for _ in range(100):
+        eroded = cv2.erode(temp_img, element)
+        temp = cv2.dilate(eroded, element)
+        temp = cv2.subtract(temp_img, temp)
+        skel = cv2.bitwise_or(skel, temp)
+        temp_img = eroded.copy()
+
+        if cv2.countNonZero(temp_img) == 0:
+            break
+
+    return skel
 
 def point_to_segment_dist(p, s1, s2):
     """Calculates distance from point p to segment s1-s2."""
