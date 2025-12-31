@@ -23,46 +23,57 @@ def detect_walls(image_path, outer_material_name, inner_material_name, sensitivi
         return []
 
     # Parameters based on Sensitivity
-    # Sensitivity 0: Strict (Long lines only, high threshold)
-    # Sensitivity 100: Loose (Short lines, low threshold)
+    # Sensitivity 0: Strict (Filters more noise, requires larger structures)
+    # Sensitivity 100: Loose (Keeps small structures)
 
-    # Inverse mapping for minLineLength: 0 -> 100px, 100 -> 10px
+    # 1. Area Threshold for Noise Removal (Text)
+    # Low Sensitivity (0) -> High Area Threshold (e.g. 300px)
+    # High Sensitivity (100) -> Low Area Threshold (e.g. 10px)
+    min_area = int(300 - (sensitivity * 2.9))
+    min_area = max(10, min_area)
+
+    # 2. Hough Parameters
     min_line_len = int(100 - (sensitivity * 0.9))
     min_line_len = max(10, min_line_len)
 
-    # Inverse mapping for Canny high threshold: 0 -> 250, 100 -> 50
-    canny_high = int(250 - (sensitivity * 2))
-    canny_high = max(50, canny_high)
-
-    # Hough Threshold (votes): 0 -> 100, 100 -> 20
-    hough_thresh = int(100 - (sensitivity * 0.8))
+    hough_thresh = int(80 - (sensitivity * 0.6))
     hough_thresh = max(20, hough_thresh)
 
     # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # 2. Preprocessing
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blurred, 50, canny_high)
+    # 2. Thresholding (Otsu Inverse to get White Walls on Black BG)
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    # 3. Find Contours
-    contours, hierarchy = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # 3. Noise Removal (Connected Components)
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh, connectivity=8)
 
-    if not contours:
-        return []
+    cleaned_mask = np.zeros_like(thresh)
 
-    # 4. Identify Outer Walls (Largest Contour)
+    for i in range(1, num_labels): # Skip background
+        area = stats[i, cv2.CC_STAT_AREA]
+        # Keep if area is large enough (removes text)
+        if area > min_area:
+            cleaned_mask[labels == i] = 255
+
+    # Close gaps
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3,3))
+    cleaned_mask = cv2.morphologyEx(cleaned_mask, cv2.MORPH_CLOSE, kernel)
+
+    # 4. Outer Walls (Largest Contour on Clean Mask)
+    # Use RETR_EXTERNAL to find only the outer boundary of the walls
+    contours, _ = cv2.findContours(cleaned_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = sorted(contours, key=cv2.contourArea, reverse=True)
 
     outer_contour = None
     img_area = img.shape[0] * img.shape[1]
 
-    for i, cnt in enumerate(contours):
-        epsilon = 0.005 * cv2.arcLength(cnt, True)
-        approx = cv2.approxPolyDP(cnt, epsilon, True)
-        area = cv2.contourArea(approx)
-
-        if area > img_area * 0.05 and area < img_area * 0.99:
+    # Find largest contour that looks like a building footprint
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area > img_area * 0.05: # Minimum 5% of image
+            epsilon = 0.005 * cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, epsilon, True)
             outer_contour = approx
             break
 
@@ -78,7 +89,10 @@ def detect_walls(image_path, outer_material_name, inner_material_name, sensitivi
                 'material': outer_material_name
             })
 
-    # 5. Identify Inner Walls using HoughLinesP
+    # 5. Inner Walls (Edges of Clean Mask)
+    # Canny on the cleaned mask to get edges
+    edges = cv2.Canny(cleaned_mask, 50, 150)
+
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=hough_thresh, minLineLength=min_line_len, maxLineGap=10)
 
     if lines is not None:

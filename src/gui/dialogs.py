@@ -261,9 +261,6 @@ class AddFloorDialog(QDialog):
             else:
                 self.lbl_image_status.setText("No image set")
 
-            # Disable autodetect by default on edit
-            self.grp_autodetect.setChecked(False)
-
     def select_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open Floor Plan", "", "Images (*.png *.jpg *.jpeg *.bmp)"

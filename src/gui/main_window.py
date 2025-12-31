@@ -18,7 +18,6 @@ from src.engine.project import Project, Floor
 from src.utils.file_io import save_project, load_project
 from src.utils.command_invoker import UndoStack, AddWallCommand, AddAPCommand, DeleteCommand, MoveCommand
 from src.utils.report_generator import PDFReport
-from src.utils.vision import detect_walls
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -339,25 +338,72 @@ class MainWindow(QMainWindow):
             floor.material_name = data['material']
             floor.ceiling_height = data['ceiling_height']
 
-            if data['image_path'] and data['image_path'] != floor.image_path:
-                # Image Changed: Sync old items to model first?
-                # If we rely on model being source of truth for items during reload,
-                # we must ensure model is up to date with scene.
+            # Check for changes that require scene refresh
+            image_changed = (data['image_path'] and data['image_path'] != floor.image_path)
+            detected_walls = data.get('detected_walls')
+
+            if image_changed or detected_walls:
                 canvas = self.tabs.widget(index)
                 if canvas:
-                    # Sync scene -> floor object
-                    self._sync_canvas_to_floor(canvas, floor)
+                    # Sync scene -> floor object (preserve other items if only walls updated?)
+                    # If we auto-detected walls, we are replacing existing walls.
+                    # But we might want to keep APs/Zones.
+                    # _sync_canvas_to_floor overwrites floor.walls/aps/regions from scene.
+                    # We should probably sync APs/Regions but NOT walls if we are about to overwrite them.
 
-                    floor.image_path = data['image_path']
+                    # 1. Capture current APs/Zones from Scene
+                    current_aps = []
+                    current_zones = []
+                    for item in canvas.scene.items():
+                         if isinstance(item, AccessPointItem):
+                            current_aps.append({
+                                'x': item.scenePos().x(),
+                                'y': item.scenePos().y(),
+                                'model': item.model_name,
+                                'name': item.name
+                            })
+                         elif isinstance(item, ZoneItem):
+                             r = item.sceneBoundingRect()
+                             current_zones.append({
+                                 'rect': [r.x(), r.y(), r.width(), r.height()],
+                                 'height': item.ceiling_height
+                             })
 
-                    # Clear Scene Items (except background which load_image handles, but we need to clear walls/aps)
-                    canvas.scene.clear()
+                    # 2. Update Floor Object
+                    floor.access_points = current_aps
+                    floor.regions = current_zones
 
-                    # Auto-Detect on Edit
-                    detected_walls = data.get('detected_walls')
+                    if image_changed:
+                        floor.image_path = data['image_path']
+
                     if detected_walls:
                         floor.walls = detected_walls
                         self.status_bar.showMessage(f"Updated walls: {len(detected_walls)} segments.")
+                    elif image_changed:
+                         # If image changed but no new walls detected, should we keep old walls?
+                         # Usually walls belong to the image.
+                         # Logic in original code: _sync_canvas_to_floor saved them.
+                         # So they are preserved. But they might be misaligned.
+                         # User responsibility.
+                         # We already synced walls via _sync_canvas_to_floor?
+                         # Wait, I removed _sync_canvas_to_floor call above.
+                         # So currently floor.walls has old data (from previous to_dict call or load).
+                         # We should probably sync walls too IF we are not overwriting them.
+
+                         # Capture walls from scene just in case we need them
+                         current_walls = []
+                         for item in canvas.scene.items():
+                            if isinstance(item, WallItem):
+                                l = item.line()
+                                current_walls.append({
+                                    'p1': (l.x1(), l.y1()),
+                                    'p2': (l.x2(), l.y2()),
+                                    'material': item.material_name
+                                })
+                         floor.walls = current_walls
+
+                    # 3. Refresh Scene
+                    canvas.scene.clear()
 
                     # Reload Image
                     canvas.load_image(floor.image_path,
