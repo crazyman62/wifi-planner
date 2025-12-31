@@ -162,12 +162,25 @@ class MainWindow(QMainWindow):
         self.btn_move_floor = QPushButton("Move Floor Plan") # New
 
         self.btn_select.clicked.connect(lambda: self.set_mode("SELECT"))
+        self.btn_select.setToolTip("Select items or pan the view")
+
         self.btn_calibrate.clicked.connect(lambda: self.set_mode("CALIBRATE"))
+        self.btn_calibrate.setToolTip("Calibrate the floor plan scale by drawing a line of known length")
+
         self.btn_draw_wall.clicked.connect(lambda: self.set_mode("DRAW_WALL"))
+        self.btn_draw_wall.setToolTip("Draw walls by clicking endpoints. Right-click to stop.")
+
         self.btn_edit_nodes.clicked.connect(lambda: self.set_mode("EDIT_NODES"))
+        self.btn_edit_nodes.setToolTip("Drag wall endpoints to adjust connections")
+
         self.btn_draw_zone.clicked.connect(lambda: self.set_mode("DRAW_ZONE"))
+        self.btn_draw_zone.setToolTip("Define an area with a specific ceiling height")
+
         self.btn_add_ap.clicked.connect(lambda: self.set_mode("ADD_AP"))
+        self.btn_add_ap.setToolTip("Place a new Access Point on the map")
+
         self.btn_move_floor.clicked.connect(lambda: self.set_mode("MOVE_FLOOR"))
+        self.btn_move_floor.setToolTip("Drag the floor plan image to align it")
 
         self.sidebar_layout.addWidget(self.btn_select)
         self.sidebar_layout.addWidget(self.btn_calibrate)
@@ -201,14 +214,17 @@ class MainWindow(QMainWindow):
         rot_layout = QHBoxLayout()
         self.btn_rot_left = QPushButton("-90°")
         self.btn_rot_left.clicked.connect(self.rotate_left)
+        self.btn_rot_left.setToolTip("Rotate floor 90° Counter-Clockwise")
 
         self.spin_rot = QDoubleSpinBox()
         self.spin_rot.setRange(-360, 360)
         self.spin_rot.setPrefix("Rot: ")
         self.spin_rot.valueChanged.connect(self.update_floor_transform)
+        self.spin_rot.setToolTip("Fine-tune rotation angle")
 
         self.btn_rot_right = QPushButton("+90°")
         self.btn_rot_right.clicked.connect(self.rotate_right)
+        self.btn_rot_right.setToolTip("Rotate floor 90° Clockwise")
 
         rot_layout.addWidget(self.btn_rot_left)
         rot_layout.addWidget(self.spin_rot)
@@ -222,11 +238,13 @@ class MainWindow(QMainWindow):
         self.spin_scale.setValue(1.0)
         self.spin_scale.setPrefix("Scale: ")
         self.spin_scale.valueChanged.connect(self.update_floor_transform)
+        self.spin_scale.setToolTip("Adjust the display scale of the floor plan image")
         align_layout.addWidget(self.spin_scale)
 
         self.chk_ghost = QPushButton("Toggle Ghost Floor")
         self.chk_ghost.setCheckable(True)
         self.chk_ghost.clicked.connect(self.toggle_ghost_floor)
+        self.chk_ghost.setToolTip("Overlay the floor below to help with alignment")
         align_layout.addWidget(self.chk_ghost)
 
         self.sidebar_layout.addLayout(align_layout)
@@ -949,62 +967,66 @@ class MainWindow(QMainWindow):
             return
 
         self.status_bar.showMessage("Generating Heatmap...")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         QApplication.processEvents()
 
-        # Ensure heatmap_item attribute exists if we init tabs dynamically
-        if not hasattr(self.current_canvas, 'heatmap_item'):
-            self.current_canvas.heatmap_item = None
+        try:
+            # Ensure heatmap_item attribute exists if we init tabs dynamically
+            if not hasattr(self.current_canvas, 'heatmap_item'):
+                self.current_canvas.heatmap_item = None
 
-        # Remove existing heatmap before calculating bounds
-        if self.current_canvas.heatmap_item:
-            if self.current_canvas.heatmap_item.scene() == self.current_canvas.scene:
-                self.current_canvas.scene.removeItem(self.current_canvas.heatmap_item)
-            self.current_canvas.heatmap_item = None
+            # Remove existing heatmap before calculating bounds
+            if self.current_canvas.heatmap_item:
+                if self.current_canvas.heatmap_item.scene() == self.current_canvas.scene:
+                    self.current_canvas.scene.removeItem(self.current_canvas.heatmap_item)
+                self.current_canvas.heatmap_item = None
 
-        # Update to use the full scene rect (including moved images)
-        # We use itemsBoundingRect to get the extent of all items (Image, Walls, APs)
-        rect = self.current_canvas.scene.itemsBoundingRect()
+            # Update to use the full scene rect (including moved images)
+            # We use itemsBoundingRect to get the extent of all items (Image, Walls, APs)
+            rect = self.current_canvas.scene.itemsBoundingRect()
 
-        # Add Padding/Bleed (e.g., 200 pixels margin)
-        margin = 200
-        rect.adjust(-margin, -margin, margin, margin)
+            # Add Padding/Bleed (e.g., 200 pixels margin)
+            margin = 200
+            rect.adjust(-margin, -margin, margin, margin)
 
-        width = int(rect.width())
-        height = int(rect.height())
+            width = int(rect.width())
+            height = int(rect.height())
 
-        # Also need top-left offset to place the pixmap correctly
-        offset_x = rect.x()
-        offset_y = rect.y()
+            # Also need top-left offset to place the pixmap correctly
+            offset_x = rect.x()
+            offset_y = rect.y()
 
-        if width <= 0 or height <= 0: return
+            if width <= 0 or height <= 0: return
 
-        rssi_grid = generate_heatmap(
-            width, height,
-            self.current_floor.pixels_per_meter,
-            all_aps,
-            current_walls,
-            self.hardware_data,
-            self.materials_data,
-            frequency_band=self.combo_band.currentText(),
-            resolution=20,
-            target_z=target_z,
-            floors_config=self.project.floors,
-            floor_z_map=floor_z_map,
-            origin_offset=(offset_x, offset_y) # Pass origin
-        )
+            rssi_grid = generate_heatmap(
+                width, height,
+                self.current_floor.pixels_per_meter,
+                all_aps,
+                current_walls,
+                self.hardware_data,
+                self.materials_data,
+                frequency_band=self.combo_band.currentText(),
+                resolution=20,
+                target_z=target_z,
+                floors_config=self.project.floors,
+                floor_z_map=floor_z_map,
+                origin_offset=(offset_x, offset_y) # Pass origin
+            )
 
-        pixmap = heatmap_to_pixmap(rssi_grid, width, height,
-                                   self.project.heatmap_min_dbm,
-                                   self.project.heatmap_max_dbm)
+            pixmap = heatmap_to_pixmap(rssi_grid, width, height,
+                                       self.project.heatmap_min_dbm,
+                                       self.project.heatmap_max_dbm)
 
-        self.current_canvas.heatmap_item = QGraphicsPixmapItem(pixmap)
+            self.current_canvas.heatmap_item = QGraphicsPixmapItem(pixmap)
 
-        # Position heatmap correctly at the top-left of the bounding rect
-        self.current_canvas.heatmap_item.setPos(offset_x, offset_y)
+            # Position heatmap correctly at the top-left of the bounding rect
+            self.current_canvas.heatmap_item.setPos(offset_x, offset_y)
 
-        self.current_canvas.heatmap_item.setZValue(10)
-        self.current_canvas.scene.addItem(self.current_canvas.heatmap_item)
-        self.status_bar.showMessage("Heatmap generated.")
+            self.current_canvas.heatmap_item.setZValue(10)
+            self.current_canvas.scene.addItem(self.current_canvas.heatmap_item)
+            self.status_bar.showMessage("Heatmap generated.")
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def save_project(self):
         # Sync Scene items back to Floor objects before saving
@@ -1084,6 +1106,7 @@ class MainWindow(QMainWindow):
             return
 
         self.status_bar.showMessage("Generating Report... Please wait.")
+        QApplication.setOverrideCursor(Qt.WaitCursor)
         QApplication.processEvents()
 
         original_tab_idx = self.tabs.currentIndex()
@@ -1189,6 +1212,7 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage(f"Error exporting report: {e}")
             print(f"Export Error: {e}")
         finally:
+            QApplication.restoreOverrideCursor()
             # Restore state
             self.tabs.setCurrentIndex(original_tab_idx)
             self.combo_band.setCurrentIndex(original_band_idx)
