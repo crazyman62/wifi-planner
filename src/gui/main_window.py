@@ -5,8 +5,8 @@ import math
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
                                QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox,
-                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox, QFormLayout)
-from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter, QMouseEvent
+                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox, QFormLayout, QToolTip)
+from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter, QMouseEvent, QCursor
 from PySide6.QtCore import Qt, QPointF, QRectF
 
 from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsPixmapItem, QGraphicsRectItem
@@ -303,14 +303,19 @@ class MainWindow(QMainWindow):
         self.top_toolbar_layout.addSpacing(20)
 
         # Band Selection
-        self.top_toolbar_layout.addWidget(QLabel("<b>Frequency Band:</b>"))
+        self.top_toolbar_layout.addWidget(QLabel("<b>Freq Band (GHz):</b>"))
         self.combo_band = QComboBox()
         self.combo_band.addItems(["2.4", "5", "6"])
         self.combo_band.setCurrentText("5")
         self.combo_band.currentIndexChanged.connect(self.trigger_heatmap)
+        self.combo_band.currentIndexChanged.connect(self.update_material_combo_labels)
+        self.combo_band.currentIndexChanged.connect(self.update_wall_tooltips)
         self.top_toolbar_layout.addWidget(self.combo_band)
 
         self.top_toolbar_layout.addStretch()
+
+        # Initial update of labels
+        self.update_material_combo_labels()
 
     def _create_statusbar(self):
         self.status_bar = QStatusBar()
@@ -543,6 +548,8 @@ class MainWindow(QMainWindow):
     def _populate_canvas_items(self, canvas, floor):
         # Walls
         wall_mats = {m['name']: m for m in self.materials_data.get('materials', [])}
+        current_band = self.combo_band.currentText()
+
         for w in floor.walls:
             # Helper to normalize access
             def get_val(item, key, default):
@@ -552,8 +559,14 @@ class MainWindow(QMainWindow):
             p2 = get_val(w, 'p2', (0,0))
             mat = get_val(w, 'material', 'Concrete')
 
-            color_hex = wall_mats.get(mat, {}).get('color', '#000000')
+            mat_data = wall_mats.get(mat, {})
+            color_hex = mat_data.get('color', '#000000')
             wall_item = WallItem((p1[0], p1[1]), (p2[0], p2[1]), mat, color_hex)
+
+            # Set Tooltip
+            loss = mat_data.get('loss', {}).get(current_band, 0.0)
+            wall_item.setToolTip(f"Material: {mat}\nLoss: {loss} dB @ {current_band} GHz")
+
             canvas.scene.addItem(wall_item)
 
         # APs
@@ -814,9 +827,17 @@ class MainWindow(QMainWindow):
         else:
             end_point = point
             # Create Wall
-            mat_name = self.combo_materials.currentText()
-            wall_mats = {m['name']: m for m in self.materials_data.get('materials', [])}
-            color = wall_mats.get(mat_name, {}).get('color', '#000000')
+            # The combo text now has "Name (dB)", we need to extract the real name or use index.
+            # Best to use index to look up in raw data.
+            idx = self.combo_materials.currentIndex()
+            all_mats = self.materials_data.get('materials', [])
+            if 0 <= idx < len(all_mats):
+                mat_data = all_mats[idx]
+                mat_name = mat_data['name']
+                color = mat_data.get('color', '#000000')
+            else:
+                mat_name = "Concrete"
+                color = "#000000"
 
             wall_item = WallItem(
                 (self.drawing_start_point.x(), self.drawing_start_point.y()),
@@ -824,6 +845,11 @@ class MainWindow(QMainWindow):
                 mat_name,
                 color
             )
+
+            # Set Initial Tooltip
+            band = self.combo_band.currentText()
+            loss = mat_data.get('loss', {}).get(band, 0.0)
+            wall_item.setToolTip(f"Material: {mat_name}\nLoss: {loss} dB @ {band} GHz")
 
             cmd = AddWallCommand(self.current_canvas.scene, wall_item)
             self.undo_stack.push(cmd)
@@ -875,6 +901,37 @@ class MainWindow(QMainWindow):
                 self.status_bar.showMessage("Zone Added.")
 
     def handle_canvas_move(self, point):
+        # Heatmap Signal Tooltip
+        if self.current_canvas and hasattr(self.current_canvas, 'heatmap_data'):
+            hd = self.current_canvas.heatmap_data
+            if hd:
+                # Calculate Grid Index
+                ox, oy = hd['origin']
+                res = hd['resolution']
+                w_px = hd['width']
+                h_px = hd['height']
+
+                # Local coords relative to heatmap origin
+                lx = point.x() - ox
+                ly = point.y() - oy
+
+                if 0 <= lx < w_px and 0 <= ly < h_px:
+                    # Map to grid index
+                    gx = int(lx / res)
+                    gy = int(ly / res)
+
+                    grid = hd['grid']
+                    if 0 <= gy < grid.shape[0] and 0 <= gx < grid.shape[1]:
+                        val = grid[gy, gx]
+                        if val > -99.0: # Filter noise floor
+                             QToolTip.showText(QCursor.pos(), f"Signal: {val:.1f} dBm")
+                        else:
+                             QToolTip.hideText() # Hide if off-grid
+                    else:
+                        QToolTip.hideText()
+                else:
+                    pass # Don't hide aggressively, might be over other items
+
         # Update Wall Nodes logic (Handled by WallItem.update_positions called via itemChange in Node)
         # We need to make sure update positions is called.
         # WallNodeItem sends geometry changes, but WallItem needs to listen?
@@ -972,6 +1029,19 @@ class MainWindow(QMainWindow):
                 self.spin_zone_height.blockSignals(True)
                 self.spin_zone_height.setValue(item.ceiling_height)
                 self.spin_zone_height.blockSignals(False)
+            elif isinstance(item, WallItem):
+                self.selected_item_start_pos = None
+                # Sync Dropdown to Wall Material
+                # We need to find the index that corresponds to item.material_name
+                # The dropdown now contains "Material (dB)" strings.
+                # We can fuzzy match or rely on order if preserved?
+                # The order is preserved from self.materials_data['materials'].
+
+                mat_list = self.materials_data.get('materials', [])
+                for i, m in enumerate(mat_list):
+                    if m['name'] == item.material_name:
+                        self.combo_materials.setCurrentIndex(i)
+                        break
             else:
                  self.selected_item_start_pos = None
         else:
@@ -1144,6 +1214,15 @@ class MainWindow(QMainWindow):
                 floor_z_map=floor_z_map,
                 origin_offset=(offset_x, offset_y) # Pass origin
             )
+
+            # Store Heatmap Data for Tooltips
+            self.current_canvas.heatmap_data = {
+                'grid': rssi_grid,
+                'origin': (offset_x, offset_y),
+                'resolution': 20,
+                'width': width,
+                'height': height
+            }
 
             pixmap = heatmap_to_pixmap(rssi_grid, width, height,
                                        self.project.heatmap_min_dbm,
@@ -1354,6 +1433,45 @@ class MainWindow(QMainWindow):
                 # We switched back to original_tab_idx.
                 # on_tab_changed -> update_ghost_view if checked.
                 # So ghost should reappear.
+
+    def update_material_combo_labels(self):
+        """Updates the dropdown labels to include attenuation for the current band."""
+        band = self.combo_band.currentText()
+        current_idx = self.combo_materials.currentIndex()
+
+        self.combo_materials.blockSignals(True)
+        self.combo_materials.clear()
+
+        wall_mats = self.materials_data.get('materials', [])
+
+        items = []
+        for m in wall_mats:
+            name = m['name']
+            loss = m.get('loss', {}).get(band, 0.0)
+            items.append(f"{name} ({loss} dB)")
+
+        self.combo_materials.addItems(items)
+
+        if 0 <= current_idx < len(items):
+            self.combo_materials.setCurrentIndex(current_idx)
+        else:
+             self.combo_materials.setCurrentIndex(0)
+
+        self.combo_materials.blockSignals(False)
+
+    def update_wall_tooltips(self):
+        """Updates tooltips for all walls in all open tabs when the band changes."""
+        band = self.combo_band.currentText()
+        wall_mats = {m['name']: m for m in self.materials_data.get('materials', [])}
+
+        # Iterate all tabs
+        for i in range(self.tabs.count()):
+            canvas = self.tabs.widget(i)
+            if isinstance(canvas, PlanCanvas):
+                for item in canvas.scene.items():
+                    if isinstance(item, WallItem):
+                        loss = wall_mats.get(item.material_name, {}).get(band, 0.0)
+                        item.setToolTip(f"Material: {item.material_name}\nLoss: {loss} dB @ {band} GHz")
 
 def main():
     app = QApplication(sys.argv)
