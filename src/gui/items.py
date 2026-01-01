@@ -73,7 +73,7 @@ class WallItem(QGraphicsLineItem):
             self.setLine(line)
 
 class AccessPointItem(QGraphicsEllipseItem):
-    def __init__(self, x, y, model_name, name="AP", parent=None):
+    def __init__(self, x, y, model_name, name="AP", mounting="Ceiling", parent=None):
         # Radius 10px
         r = 10
         # Initialize centered at local (0,0)
@@ -84,6 +84,7 @@ class AccessPointItem(QGraphicsEllipseItem):
 
         self.model_name = model_name
         self.name = name
+        self.mounting = mounting  # "Ceiling" or "Wall"
 
         # Appearance
         self.setBrush(QBrush(QColor("green")))

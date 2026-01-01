@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from src.engine.physics import calculate_log_distance_path_loss, segments_intersect
+from src.engine.physics import calculate_log_distance_path_loss, segments_intersect, get_antenna_gain
 
 def generate_heatmap(
     width, height,
@@ -97,11 +97,15 @@ def generate_heatmap(
         if not band_spec: continue
 
         tx_power = band_spec['max_tx_power']
-        gain = band_spec['gain']
+        gain_isotropic = band_spec['gain']
+        pattern_data = band_spec.get('pattern', None)
+
         freq = target_freq # MHz
 
         ap_x, ap_y = ap['x'], ap['y']
         ap_z = ap.get('z', 0.0)
+        mounting = ap.get('mounting', 'Ceiling')
+
         effective_ap_z = ap_z
 
         f_loss = 0.0
@@ -114,14 +118,48 @@ def generate_heatmap(
             continue
 
         receiver_z = target_z + 1.0
-        dz_sq = (effective_ap_z - receiver_z) ** 2
+        dz = effective_ap_z - receiver_z # Z diff in meters (AP - Rx)
 
         # --- Vectorized Calculations ---
-        dx = grid_x - ap_x
-        dy = grid_y - ap_y
-        dist_2d_px_sq = dx*dx + dy*dy
+        # Grid X/Y in scene pixels
+        dx_px = grid_x - ap_x
+        dy_px = grid_y - ap_y
+
+        # Convert to meters
+        dx_m = dx_px / ppm
+        dy_m = dy_px / ppm
+
+        dist_2d_px_sq = dx_px*dx_px + dy_px*dy_px
         dist_2d_m = np.sqrt(dist_2d_px_sq) / ppm
-        dist_3d_m = np.sqrt(dist_2d_m**2 + dz_sq)
+        dist_3d_m = np.sqrt(dist_2d_m**2 + dz**2)
+
+        # Antenna Pattern Gain
+        # We pass vectors in METERS (dx_m, dy_m, dz)
+        # Note: dx_m is (Pixel_x - AP_x) / ppm.
+        # This matches the vector from AP to Pixel.
+        current_antenna_gain = get_antenna_gain(dx_m, dy_m, dz, mounting, pattern_data)
+
+        # Total Gain = Isotropic Gain + Pattern Gain
+        # Wait, usually pattern data is normalized to dBi? Or normalized to 0 dB max?
+        # Unifi docs: "reciprocal... high gain".
+        # If we use the pattern data directly (e.g., -2.7 dBi), it's the absolute gain.
+        # So we should use pattern gain INSTEAD of 'gain' from JSON?
+        # Or is 'gain' the peak gain and pattern is relative?
+        # The file values I saw were like -2.7, -3.0.
+        # U6-Pro spec says Gain 6.0 dBi.
+        # File max is around -2.7? Wait.
+        # If spec says 6 dBi, but file says -2.7... maybe file is normalized to 0? Or maybe file is raw simulation relative to isotropic?
+        # If file is raw dBi, then -2.7 is weird for a 6dBi antenna.
+        # Maybe -2.7 dBd? Or maybe the file is relative to peak?
+        # Let's assume pattern data + peak gain offset?
+        # In physics.py I did: `gain_grid = g_az + g_el - peak_gain`.
+        # And I calculated peak_gain from the arrays themselves.
+        # So `gain_grid` is essentially just `g_az + g_el - max(g_az, g_el)`.
+        # If arrays are relative, this preserves the shape.
+        # Then we add `gain_isotropic` (the peak spec gain) to it.
+        # So: Total Gain = Spec_Gain + Pattern_Shape_Delta.
+
+        total_gain = gain_isotropic + current_antenna_gain
 
         # Vectorized Wall Loss
         current_wall_loss = np.zeros_like(grid_x)
@@ -165,14 +203,14 @@ def generate_heatmap(
             w1_ap_y = -ap_w1_y
 
             # Pixel - AP = (dx, dy) which we already computed
-            d3 = w1_ap_x * dy - w1_ap_y * dx
+            d3 = w1_ap_x * dy_px - w1_ap_y * dx_px
 
             # d4 = Direction(AP, Pixel, W2) = Cross(W2-AP, Pixel-AP)
             # W2 - AP
             w2_ap_x = w2x - ap_x
             w2_ap_y = w2y - ap_y
 
-            d4 = w2_ap_x * dy - w2_ap_y * dx
+            d4 = w2_ap_x * dy_px - w2_ap_y * dx_px
 
             # Intersection Condition:
             # ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) AND
@@ -200,7 +238,7 @@ def generate_heatmap(
         dist_safe = np.maximum(dist_3d_m, 0.1)
         fspl = 20 * np.log10(dist_safe) + 20 * np.log10(freq) - 27.55
 
-        rssi_grid = tx_power + gain - fspl - current_wall_loss - f_loss
+        rssi_grid = tx_power + total_gain - fspl - current_wall_loss - f_loss
 
         # Update Heatmap
         heatmap = np.maximum(heatmap, rssi_grid)

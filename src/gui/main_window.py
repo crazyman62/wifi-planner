@@ -280,6 +280,16 @@ class MainWindow(QMainWindow):
         self.sidebar_layout.addWidget(self.zone_props_widget)
         self.zone_props_widget.hide()
 
+        # AP Properties Widget
+        self.ap_props_widget = QWidget()
+        ap_layout = QFormLayout(self.ap_props_widget)
+        self.combo_ap_mounting = QComboBox()
+        self.combo_ap_mounting.addItems(["Ceiling", "Wall"])
+        self.combo_ap_mounting.currentTextChanged.connect(self.update_selected_ap_mounting)
+        ap_layout.addRow("Mounting:", self.combo_ap_mounting)
+        self.sidebar_layout.addWidget(self.ap_props_widget)
+        self.ap_props_widget.hide()
+
         self.sidebar_layout.addWidget(self.btn_settings)
 
     def _create_top_toolbar(self):
@@ -384,7 +394,8 @@ class MainWindow(QMainWindow):
                                 'x': item.scenePos().x(),
                                 'y': item.scenePos().y(),
                                 'model': item.model_name,
-                                'name': item.name
+                                'name': item.name,
+                                'mounting': item.mounting
                             })
                          elif isinstance(item, ZoneItem):
                              r = item.sceneBoundingRect()
@@ -464,7 +475,8 @@ class MainWindow(QMainWindow):
                     'x': item.scenePos().x(),
                     'y': item.scenePos().y(),
                     'model': item.model_name,
-                    'name': item.name
+                    'name': item.name,
+                    'mounting': item.mounting
                 })
         floor.access_points = aps
 
@@ -581,8 +593,9 @@ class MainWindow(QMainWindow):
             y = ap['y'] if isinstance(ap, dict) else ap.y
             model = ap['model'] if isinstance(ap, dict) else ap.model
             name = ap['name'] if isinstance(ap, dict) else ap.name
+            mounting = ap.get('mounting', 'Ceiling') if isinstance(ap, dict) else getattr(ap, 'mounting', 'Ceiling')
 
-            ap_item = AccessPointItem(x, y, model, name)
+            ap_item = AccessPointItem(x, y, model, name, mounting)
             canvas.scene.addItem(ap_item)
 
         # Zones
@@ -1026,11 +1039,16 @@ class MainWindow(QMainWindow):
         selected = self.current_canvas.scene.selectedItems()
 
         self.zone_props_widget.hide()
+        self.ap_props_widget.hide()
 
         if len(selected) == 1:
             item = selected[0]
             if isinstance(item, AccessPointItem):
                 self.selected_item_start_pos = item.pos()
+                self.ap_props_widget.show()
+                self.combo_ap_mounting.blockSignals(True)
+                self.combo_ap_mounting.setCurrentText(item.mounting)
+                self.combo_ap_mounting.blockSignals(False)
             elif isinstance(item, ZoneItem):
                 self.selected_item_start_pos = None
                 self.zone_props_widget.show()
@@ -1060,6 +1078,13 @@ class MainWindow(QMainWindow):
         selected = self.current_canvas.scene.selectedItems()
         if len(selected) == 1 and isinstance(selected[0], ZoneItem):
             selected[0].set_height(val)
+            self.trigger_heatmap()
+
+    def update_selected_ap_mounting(self, text):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            selected[0].mounting = text
             self.trigger_heatmap()
 
     def keyPressEvent(self, event):
@@ -1164,7 +1189,8 @@ class MainWindow(QMainWindow):
                             'x': pos.x(),
                             'y': pos.y(),
                             'z': floor_slab_z + ap_z_offset, # Absolute Z
-                            'model': item.model_name
+                            'model': item.model_name,
+                            'mounting': item.mounting
                         })
             else:
                 # Fallback to stored data if tab not active?
@@ -1272,7 +1298,8 @@ class MainWindow(QMainWindow):
                             'x': item.scenePos().x(),
                             'y': item.scenePos().y(),
                             'model': item.model_name,
-                            'name': item.name
+                            'name': item.name,
+                            'mounting': item.mounting
                         })
                 floor.access_points = aps
 
