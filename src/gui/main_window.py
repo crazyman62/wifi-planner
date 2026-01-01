@@ -22,7 +22,7 @@ from src.utils.report_generator import PDFReport
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("WiFi Predictive Planner - Phase 2")
+        self.setWindowTitle("WiFi Predictive Planner - Phase 3")
         self.resize(1200, 800)
 
         # Initialize Project
@@ -169,10 +169,10 @@ class MainWindow(QMainWindow):
         self.btn_select = QPushButton("Select / Pan")
         self.btn_calibrate = QPushButton("Calibrate Scale")
         self.btn_draw_wall = QPushButton("Draw Wall")
-        self.btn_edit_nodes = QPushButton("Edit Wall Nodes") # New
-        self.btn_draw_zone = QPushButton("Draw Ceiling Zone") # New
+        self.btn_edit_nodes = QPushButton("Edit Wall Nodes")
+        self.btn_draw_zone = QPushButton("Draw Ceiling Zone")
         self.btn_add_ap = QPushButton("Add AP")
-        self.btn_move_floor = QPushButton("Move Floor Plan") # New
+        self.btn_move_floor = QPushButton("Move Floor Plan")
 
         self.btn_select.clicked.connect(lambda: self.set_mode("SELECT"))
         self.btn_select.setToolTip("Select items or pan the view")
@@ -280,6 +280,24 @@ class MainWindow(QMainWindow):
         self.sidebar_layout.addWidget(self.zone_props_widget)
         self.zone_props_widget.hide()
 
+        # AP Properties Widget
+        self.ap_props_widget = QWidget()
+        ap_layout = QFormLayout(self.ap_props_widget)
+
+        self.combo_ap_mounting = QComboBox()
+        self.combo_ap_mounting.addItems(["Ceiling", "Wall"])
+        self.combo_ap_mounting.currentTextChanged.connect(self.update_selected_ap_mounting)
+        ap_layout.addRow("Mounting:", self.combo_ap_mounting)
+
+        self.spin_ap_rotation = QDoubleSpinBox()
+        self.spin_ap_rotation.setRange(0, 360)
+        self.spin_ap_rotation.setSuffix("°")
+        self.spin_ap_rotation.valueChanged.connect(self.update_selected_ap_rotation)
+        ap_layout.addRow("Direction:", self.spin_ap_rotation)
+
+        self.sidebar_layout.addWidget(self.ap_props_widget)
+        self.ap_props_widget.hide()
+
         self.sidebar_layout.addWidget(self.btn_settings)
 
     def _create_top_toolbar(self):
@@ -370,10 +388,6 @@ class MainWindow(QMainWindow):
                 canvas = self.tabs.widget(index)
                 if canvas:
                     # Sync scene -> floor object (preserve other items if only walls updated?)
-                    # If we auto-detected walls, we are replacing existing walls.
-                    # But we might want to keep APs/Zones.
-                    # _sync_canvas_to_floor overwrites floor.walls/aps/regions from scene.
-                    # We should probably sync APs/Regions but NOT walls if we are about to overwrite them.
 
                     # 1. Capture current APs/Zones from Scene
                     current_aps = []
@@ -384,7 +398,9 @@ class MainWindow(QMainWindow):
                                 'x': item.scenePos().x(),
                                 'y': item.scenePos().y(),
                                 'model': item.model_name,
-                                'name': item.name
+                                'name': item.name,
+                                'mounting': item.mounting,
+                                'rotation': item.rotation
                             })
                          elif isinstance(item, ZoneItem):
                              r = item.sceneBoundingRect()
@@ -404,16 +420,6 @@ class MainWindow(QMainWindow):
                         floor.walls = detected_walls
                         self.status_bar.showMessage(f"Updated walls: {len(detected_walls)} segments.")
                     elif image_changed:
-                         # If image changed but no new walls detected, should we keep old walls?
-                         # Usually walls belong to the image.
-                         # Logic in original code: _sync_canvas_to_floor saved them.
-                         # So they are preserved. But they might be misaligned.
-                         # User responsibility.
-                         # We already synced walls via _sync_canvas_to_floor?
-                         # Wait, I removed _sync_canvas_to_floor call above.
-                         # So currently floor.walls has old data (from previous to_dict call or load).
-                         # We should probably sync walls too IF we are not overwriting them.
-
                          # Capture walls from scene just in case we need them
                          current_walls = []
                          for item in canvas.scene.items():
@@ -464,7 +470,9 @@ class MainWindow(QMainWindow):
                     'x': item.scenePos().x(),
                     'y': item.scenePos().y(),
                     'model': item.model_name,
-                    'name': item.name
+                    'name': item.name,
+                    'mounting': item.mounting,
+                    'rotation': item.rotation
                 })
         floor.access_points = aps
 
@@ -581,8 +589,10 @@ class MainWindow(QMainWindow):
             y = ap['y'] if isinstance(ap, dict) else ap.y
             model = ap['model'] if isinstance(ap, dict) else ap.model
             name = ap['name'] if isinstance(ap, dict) else ap.name
+            mounting = ap.get('mounting', 'Ceiling') if isinstance(ap, dict) else getattr(ap, 'mounting', 'Ceiling')
+            rotation = ap.get('rotation', 0.0) if isinstance(ap, dict) else getattr(ap, 'rotation', 0.0)
 
-            ap_item = AccessPointItem(x, y, model, name)
+            ap_item = AccessPointItem(x, y, model, name, mounting, rotation)
             canvas.scene.addItem(ap_item)
 
         # Zones
@@ -928,34 +938,38 @@ class MainWindow(QMainWindow):
                     gx = int(lx / res)
                     gy = int(ly / res)
 
+                    # Max Grid
                     grid = hd['grid']
+                    # Individual Grids (ap_grids is a dict)
+                    ap_grids = hd.get('ap_grids', {})
+
+                    val = -100.0
                     if 0 <= gy < grid.shape[0] and 0 <= gx < grid.shape[1]:
                         val = grid[gy, gx]
-                        if val > -99.0: # Filter noise floor
-                             self.lbl_signal_strength.setText(f"Signal: {val:.1f} dBm")
-                        else:
-                             self.lbl_signal_strength.setText("Signal: N/A")
+
+                    if val > -90.0:
+                        # Find contributing APs
+                        contributing = []
+                        for ap_name, ap_grid in ap_grids.items():
+                            if 0 <= gy < ap_grid.shape[0] and 0 <= gx < ap_grid.shape[1]:
+                                ap_val = ap_grid[gy, gx]
+                                if ap_val > -90.0:
+                                    contributing.append(f"{ap_name}: {ap_val:.1f}")
+
+                        contributing.sort(key=lambda s: float(s.split(': ')[1]), reverse=True)
+
+                        tooltip_text = f"Max: {val:.1f} dBm"
+                        if contributing:
+                            tooltip_text += " | " + " ".join(contributing)
+
+                        self.lbl_signal_strength.setText(tooltip_text)
                     else:
                         self.lbl_signal_strength.setText("Signal: N/A")
                 else:
                      self.lbl_signal_strength.setText("Signal: N/A")
 
-        # Update Wall Nodes logic (Handled by WallItem.update_positions called via itemChange in Node)
-        # We need to make sure update positions is called.
-        # WallNodeItem sends geometry changes, but WallItem needs to listen?
-        # In my items.py code, I didn't implement the listener fully.
-        # But here in handle_canvas_move, we are tracking mouse movement for drawing tools.
-        # Node dragging is handled by QGraphicsItem standard movable flags and ItemChange.
-        # We need to hook into the scene update or implement the link.
-
-        # Let's fix the Node dragging update in the loop below or via signal.
-        # Since QGraphicsItem doesn't emit signals easily, we can check selection/movement here?
-        # Actually, `handle_canvas_move` is called on mouseMoveEvent of View.
-
+        # Update Wall Nodes logic
         if self.current_mode == "EDIT_NODES":
-            # Check if any node is moving?
-            # Better: iterate walls and call update_positions()
-            # This is inefficient but works for Phase 2.
             if self.current_canvas:
                 for item in self.current_canvas.scene.items():
                     if isinstance(item, WallItem):
@@ -1013,6 +1027,11 @@ class MainWindow(QMainWindow):
         selected = scene.selectedItems()
         if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
             item = selected[0]
+
+            # Snap to Wall if Wall Mounted
+            if item.mounting == "Wall":
+                self._snap_ap_to_wall(item)
+
             if self.selected_item_start_pos is not None:
                 new_pos = item.pos()
                 if new_pos != self.selected_item_start_pos:
@@ -1021,16 +1040,91 @@ class MainWindow(QMainWindow):
                     self.selected_item_start_pos = new_pos
                     self.trigger_heatmap()
 
+                    # Update rotation spinner if snap changed it
+                    if self.ap_props_widget.isVisible():
+                        self.spin_ap_rotation.blockSignals(True)
+                        self.spin_ap_rotation.setValue(item.rotation)
+                        self.spin_ap_rotation.blockSignals(False)
+
+    def _snap_ap_to_wall(self, ap_item):
+        """Snaps an AP to the closest wall and orients it."""
+        scene = self.current_canvas.scene
+        closest_dist = 50.0 # Pixel threshold
+        best_point = None
+        best_angle = None
+
+        ap_pos = ap_item.pos()
+
+        for item in scene.items():
+            if isinstance(item, WallItem):
+                line = item.line()
+                p1 = line.p1()
+                p2 = line.p2()
+
+                # Project point to segment
+                v_wall = p2 - p1
+                wall_len_sq = v_wall.x()**2 + v_wall.y()**2
+                if wall_len_sq == 0: continue
+
+                v_ap = ap_pos - p1
+                t = (v_ap.x()*v_wall.x() + v_ap.y()*v_wall.y()) / wall_len_sq
+                t = max(0, min(1, t))
+
+                proj = p1 + v_wall * t
+                dist = math.sqrt((ap_pos.x() - proj.x())**2 + (ap_pos.y() - proj.y())**2)
+
+                if dist < closest_dist:
+                    closest_dist = dist
+                    best_point = proj
+
+                    # Determine Normal Angle
+                    # Wall vector: (dx, dy)
+                    # Normal: (-dy, dx) or (dy, -dx).
+                    # We want the normal pointing towards the AP's original position (away from wall).
+                    dx = v_wall.x()
+                    dy = v_wall.y()
+
+                    normal1 = QPointF(-dy, dx)
+                    normal2 = QPointF(dy, -dx)
+
+                    # Vector from Wall to AP
+                    v_out = ap_pos - proj
+
+                    # Dot product to check direction
+                    dot1 = normal1.x()*v_out.x() + normal1.y()*v_out.y()
+
+                    final_normal = normal1 if dot1 >= 0 else normal2
+
+                    # Angle of normal
+                    angle_rad = math.atan2(final_normal.y(), final_normal.x())
+                    angle_deg = math.degrees(angle_rad)
+                    best_angle = (angle_deg + 360) % 360
+
+        if best_point:
+            ap_item.setPos(best_point)
+            if best_angle is not None:
+                ap_item.set_rotation(best_angle)
+
     def on_selection_changed(self):
         if not self.current_canvas: return
         selected = self.current_canvas.scene.selectedItems()
 
         self.zone_props_widget.hide()
+        self.ap_props_widget.hide()
 
         if len(selected) == 1:
             item = selected[0]
             if isinstance(item, AccessPointItem):
                 self.selected_item_start_pos = item.pos()
+                self.ap_props_widget.show()
+                self.combo_ap_mounting.blockSignals(True)
+                self.combo_ap_mounting.setCurrentText(item.mounting)
+                self.combo_ap_mounting.blockSignals(False)
+
+                self.spin_ap_rotation.blockSignals(True)
+                self.spin_ap_rotation.setValue(item.rotation)
+                self.spin_ap_rotation.blockSignals(False)
+
             elif isinstance(item, ZoneItem):
                 self.selected_item_start_pos = None
                 self.zone_props_widget.show()
@@ -1060,6 +1154,20 @@ class MainWindow(QMainWindow):
         selected = self.current_canvas.scene.selectedItems()
         if len(selected) == 1 and isinstance(selected[0], ZoneItem):
             selected[0].set_height(val)
+            self.trigger_heatmap()
+
+    def update_selected_ap_mounting(self, text):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            selected[0].mounting = text
+            self.trigger_heatmap()
+
+    def update_selected_ap_rotation(self, val):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            selected[0].set_rotation(val)
             self.trigger_heatmap()
 
     def keyPressEvent(self, event):
@@ -1160,17 +1268,44 @@ class MainWindow(QMainWindow):
                                 ap_z_offset = z_item.ceiling_height
                                 break
 
+                        # Adjust Z for Ceiling mount to ensure correct floor penetration logic
+                        # If Ceiling, AP is slightly below the slab above.
+                        effective_z = floor_slab_z + ap_z_offset
+                        if item.mounting == "Ceiling":
+                            effective_z -= 0.01
+
                         floor_aps.append({
                             'x': pos.x(),
                             'y': pos.y(),
-                            'z': floor_slab_z + ap_z_offset, # Absolute Z
-                            'model': item.model_name
+                            'z': effective_z, # Absolute Z
+                            'model': item.model_name,
+                            'name': item.name,
+                            'mounting': item.mounting,
+                            'rotation': item.rotation
                         })
             else:
                 # Fallback to stored data if tab not active?
                 # For robust multi-floor, we should read stored APs if canvas closed,
                 # but currently we keep all tabs open.
-                pass
+                for ap in floor.access_points:
+                    # ap is dict
+                    ap_z_offset = floor.ceiling_height
+
+                    effective_z = floor_slab_z + ap_z_offset
+                    if ap.get('mounting', 'Ceiling') == "Ceiling":
+                        effective_z -= 0.01
+
+                    # zones? simple approx if no canvas
+                    floor_aps.append({
+                        'x': ap['x'],
+                        'y': ap['y'],
+                        'z': effective_z,
+                        'model': ap['model'],
+                        'name': ap['name'],
+                        'mounting': ap.get('mounting', 'Ceiling'),
+                        'rotation': ap.get('rotation', 0.0)
+                    })
+
             all_aps.extend(floor_aps)
 
         if not all_aps:
@@ -1208,7 +1343,7 @@ class MainWindow(QMainWindow):
 
             if width <= 0 or height <= 0: return
 
-            rssi_grid = generate_heatmap(
+            rssi_grid, ap_grids = generate_heatmap(
                 width, height,
                 self.current_floor.pixels_per_meter,
                 all_aps,
@@ -1226,6 +1361,7 @@ class MainWindow(QMainWindow):
             # Store Heatmap Data for Tooltips
             self.current_canvas.heatmap_data = {
                 'grid': rssi_grid,
+                'ap_grids': ap_grids,
                 'origin': (offset_x, offset_y),
                 'resolution': 20,
                 'width': width,
@@ -1272,7 +1408,9 @@ class MainWindow(QMainWindow):
                             'x': item.scenePos().x(),
                             'y': item.scenePos().y(),
                             'model': item.model_name,
-                            'name': item.name
+                            'name': item.name,
+                            'mounting': item.mounting,
+                            'rotation': item.rotation
                         })
                 floor.access_points = aps
 
