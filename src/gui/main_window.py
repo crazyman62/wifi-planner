@@ -5,7 +5,7 @@ import math
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
                                QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox,
-                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox, QFormLayout)
+                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox, QFormLayout, QCheckBox)
 from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter, QMouseEvent
 from PySide6.QtCore import Qt, QPointF, QRectF
 
@@ -18,6 +18,7 @@ from src.engine.project import Project, Floor
 from src.utils.file_io import save_project, load_project
 from src.utils.command_invoker import UndoStack, AddWallCommand, AddAPCommand, DeleteCommand, MoveCommand
 from src.utils.report_generator import PDFReport
+from src.engine.auto_planner import run_auto_planner
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -295,6 +296,25 @@ class MainWindow(QMainWindow):
         self.spin_ap_rotation.valueChanged.connect(self.update_selected_ap_rotation)
         ap_layout.addRow("Direction:", self.spin_ap_rotation)
 
+        # Radio Props (Band Specific)
+        ap_layout.addRow(QLabel("<b>Radio Config</b>"))
+        self.combo_channel = QComboBox()
+        self.combo_channel.currentTextChanged.connect(self.update_selected_ap_channel)
+        ap_layout.addRow("Channel:", self.combo_channel)
+
+        self.combo_width = QComboBox()
+        self.combo_width.currentTextChanged.connect(self.update_selected_ap_width)
+        ap_layout.addRow("Width (MHz):", self.combo_width)
+
+        self.combo_power = QComboBox()
+        self.combo_power.addItems(["Auto", "Low", "Medium", "High"])
+        self.combo_power.currentTextChanged.connect(self.update_selected_ap_power)
+        ap_layout.addRow("Tx Power:", self.combo_power)
+
+        self.chk_manual_radio = QCheckBox("Lock Settings (Manual)")
+        self.chk_manual_radio.toggled.connect(self.update_selected_ap_manual_lock)
+        ap_layout.addRow("", self.chk_manual_radio)
+
         self.sidebar_layout.addWidget(self.ap_props_widget)
         self.ap_props_widget.hide()
 
@@ -328,6 +348,8 @@ class MainWindow(QMainWindow):
         self.combo_band.currentIndexChanged.connect(self.trigger_heatmap)
         self.combo_band.currentIndexChanged.connect(self.update_material_combo_labels)
         self.combo_band.currentIndexChanged.connect(self.update_wall_tooltips)
+        # Also need to update radio props widget if an AP is selected
+        self.combo_band.currentIndexChanged.connect(self.on_selection_changed)
         self.top_toolbar_layout.addWidget(self.combo_band)
 
         self.top_toolbar_layout.addStretch()
@@ -463,7 +485,8 @@ class MainWindow(QMainWindow):
                     'model': item.model_name,
                     'name': item.name,
                     'mounting': item.mounting,
-                    'rotation': item.rotation
+                    'rotation': item.rotation,
+                    'radios': item.radios # Save Radios
                 })
         floor.access_points = aps
 
@@ -594,8 +617,9 @@ class MainWindow(QMainWindow):
             name = ap['name'] if isinstance(ap, dict) else ap.name
             mounting = ap.get('mounting', 'Ceiling') if isinstance(ap, dict) else getattr(ap, 'mounting', 'Ceiling')
             rotation = ap.get('rotation', 0.0) if isinstance(ap, dict) else getattr(ap, 'rotation', 0.0)
+            radios = ap.get('radios') if isinstance(ap, dict) else getattr(ap, 'radios', None)
 
-            ap_item = AccessPointItem(x, y, model, name, mounting, rotation)
+            ap_item = AccessPointItem(x, y, model, name, mounting, rotation, radios=radios)
             if parent:
                 ap_item.setParentItem(parent)
             else:
@@ -1202,6 +1226,9 @@ class MainWindow(QMainWindow):
                 self.spin_ap_rotation.setValue(item.rotation)
                 self.spin_ap_rotation.blockSignals(False)
 
+                # Load Radio Config for current band
+                self._load_ap_radio_props(item)
+
             elif isinstance(item, ZoneItem):
                 self.selected_item_start_pos = None
                 self.zone_props_widget.show()
@@ -1290,6 +1317,16 @@ class MainWindow(QMainWindow):
         return closest if closest else pos
 
     def trigger_heatmap(self):
+        # Trigger Auto Planner before heatmap
+        # This updates APs in place
+        run_auto_planner(self)
+
+        # If selection matches, reload UI
+        if self.current_canvas:
+            selected = self.current_canvas.scene.selectedItems()
+            if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+                 self._load_ap_radio_props(selected[0])
+
         # Multi-floor Heatmap Logic
         if not self.current_canvas or not self.current_floor: return
         if self.current_floor.pixels_per_meter <= 0: return # No scale
@@ -1579,7 +1616,8 @@ class MainWindow(QMainWindow):
                         bom_aps.append({
                             'name': item.name,
                             'model': item.model_name,
-                            'floor_name': floor.name
+                            'floor_name': floor.name,
+                            'radios': item.radios
                         })
 
                 # Generate Bands
@@ -1648,6 +1686,113 @@ class MainWindow(QMainWindow):
                 # We switched back to original_tab_idx.
                 # on_tab_changed -> update_ghost_view if checked.
                 # So ghost should reappear.
+
+    def _load_ap_radio_props(self, ap_item):
+        band = self.combo_band.currentText()
+        config = ap_item.radios.get(band, {})
+
+        # Populate Channels based on band
+        self.combo_channel.blockSignals(True)
+        self.combo_channel.clear()
+        self.combo_channel.addItem("Auto")
+        if band == "2.4":
+            self.combo_channel.addItems([str(c) for c in [1, 6, 11]])
+        elif band == "5":
+            self.combo_channel.addItems([str(c) for c in [36, 40, 44, 48, 149, 153, 157, 161]])
+        elif band == "6":
+            self.combo_channel.addItems([str(c) for c in [1, 5, 9, 13, 17, 21]]) # Simplified
+
+        curr_ch = str(config.get('channel', 'Auto'))
+        idx = self.combo_channel.findText(curr_ch)
+        if idx >= 0:
+            self.combo_channel.setCurrentIndex(idx)
+        else:
+            self.combo_channel.setCurrentIndex(0) # Auto
+        self.combo_channel.blockSignals(False)
+
+        # Populate Widths
+        self.combo_width.blockSignals(True)
+        self.combo_width.clear()
+        if band == "2.4":
+            self.combo_width.addItems(["20", "40"])
+        else:
+            self.combo_width.addItems(["20", "40", "80", "160"])
+
+        curr_bw = str(config.get('width', 20))
+        idx = self.combo_width.findText(curr_bw)
+        if idx >= 0:
+            self.combo_width.setCurrentIndex(idx)
+        else:
+            self.combo_width.setCurrentIndex(0)
+        self.combo_width.blockSignals(False)
+
+        # Power
+        self.combo_power.blockSignals(True)
+        curr_pwr = str(config.get('power', 'Auto'))
+        self.combo_power.setCurrentText(curr_pwr)
+        self.combo_power.blockSignals(False)
+
+        # Manual Lock
+        self.chk_manual_radio.blockSignals(True)
+        self.chk_manual_radio.setChecked(config.get('manual', False))
+        self.chk_manual_radio.blockSignals(False)
+
+    def update_selected_ap_channel(self, val):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            band = self.combo_band.currentText()
+            item = selected[0]
+            # If value is numeric, convert, else keep string "Auto"
+            if val != "Auto":
+                try:
+                    val = int(val)
+                except:
+                    pass
+
+            item.radios[band]['channel'] = val
+            # Auto-lock if user changes it
+            item.radios[band]['manual'] = True
+            self.chk_manual_radio.setChecked(True)
+            self.trigger_heatmap()
+
+    def update_selected_ap_width(self, val):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            band = self.combo_band.currentText()
+            item = selected[0]
+            try:
+                val = int(val)
+            except:
+                val = 20
+            item.radios[band]['width'] = val
+            item.radios[band]['manual'] = True
+            self.chk_manual_radio.setChecked(True)
+            self.trigger_heatmap()
+
+    def update_selected_ap_power(self, val):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            band = self.combo_band.currentText()
+            item = selected[0]
+            item.radios[band]['power'] = val
+            item.radios[band]['manual'] = True
+            self.chk_manual_radio.setChecked(True)
+            self.trigger_heatmap()
+
+    def update_selected_ap_manual_lock(self, checked):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
+            band = self.combo_band.currentText()
+            item = selected[0]
+            item.radios[band]['manual'] = checked
+            # If unlocking, trigger auto-calc?
+            # Ideally yes, but auto-calc happens on move/add.
+            # We can trigger generic update.
+            self.trigger_heatmap()
 
     def update_material_combo_labels(self):
         """Updates the dropdown labels to include attenuation for the current band."""
