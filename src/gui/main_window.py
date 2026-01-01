@@ -1268,10 +1268,16 @@ class MainWindow(QMainWindow):
                                 ap_z_offset = z_item.ceiling_height
                                 break
 
+                        # Adjust Z for Ceiling mount to ensure correct floor penetration logic
+                        # If Ceiling, AP is slightly below the slab above.
+                        effective_z = floor_slab_z + ap_z_offset
+                        if item.mounting == "Ceiling":
+                            effective_z -= 0.01
+
                         floor_aps.append({
                             'x': pos.x(),
                             'y': pos.y(),
-                            'z': floor_slab_z + ap_z_offset, # Absolute Z
+                            'z': effective_z, # Absolute Z
                             'model': item.model_name,
                             'name': item.name,
                             'mounting': item.mounting,
@@ -1284,11 +1290,16 @@ class MainWindow(QMainWindow):
                 for ap in floor.access_points:
                     # ap is dict
                     ap_z_offset = floor.ceiling_height
+
+                    effective_z = floor_slab_z + ap_z_offset
+                    if ap.get('mounting', 'Ceiling') == "Ceiling":
+                        effective_z -= 0.01
+
                     # zones? simple approx if no canvas
                     floor_aps.append({
                         'x': ap['x'],
                         'y': ap['y'],
-                        'z': floor_slab_z + ap_z_offset,
+                        'z': effective_z,
                         'model': ap['model'],
                         'name': ap['name'],
                         'mounting': ap.get('mounting', 'Ceiling'),
