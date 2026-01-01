@@ -150,46 +150,100 @@ def generate_heatmap(
         # Vectorized Wall Loss
         current_wall_loss = np.zeros_like(grid_x)
 
+        # --- OPTIMIZATION: Shadow Casting for Wall Loss ---
+        # Original logic was O(Walls * Pixels) with heavy vector math.
+        # Shadow casting reduces this to O(Walls * GridResolution) via rasterization (cv2.fillPoly).
+
+        # Scratch buffer for shadow polygons (reused)
+        shadow_mask = np.zeros((grid_h, grid_w), dtype=np.uint8)
+
+        # Pre-calculate AP position in grid coordinates
+        ap_gx = (ap_x - off_x) / resolution
+        ap_gy = (ap_y - off_y) / resolution
+
+        # Scene bounds for projection (in grid coordinates)
+        # 0,0 is top left. grid_w, grid_h is bottom right.
+
+        def project_to_bounds(origin_x, origin_y, target_x, target_y, w, h):
+            """Project ray from origin through target to the box boundary"""
+            dx = target_x - origin_x
+            dy = target_y - origin_y
+
+            if dx == 0 and dy == 0:
+                return target_x, target_y
+
+            # Intersections with 4 lines: x=0, x=w, y=0, y=h
+            # t values for each
+            t_candidates = []
+
+            if dx != 0:
+                t1 = (0 - origin_x) / dx
+                if t1 > 0: t_candidates.append(t1)
+                t2 = (w - origin_x) / dx
+                if t2 > 0: t_candidates.append(t2)
+
+            if dy != 0:
+                t3 = (0 - origin_y) / dy
+                if t3 > 0: t_candidates.append(t3)
+                t4 = (h - origin_y) / dy
+                if t4 > 0: t_candidates.append(t4)
+
+            if not t_candidates:
+                return target_x, target_y # Should not happen if target is inside/near box
+
+            # We want the smallest t that is >= 1 (since target is at t=1)
+            # Actually target is wall endpoint. We want to extend BEYOND wall.
+            # So we want smallest t > 1?
+            # If wall is outside box, t could be < 1?
+            # Let's just take the smallest t that puts us on the boundary and is "forward".
+            # The ray is P -> W. We want points "behind" W. So t >= 1.
+
+            best_t = None
+            for t in t_candidates:
+                # Tolerance for float
+                if t >= 0.999:
+                    if best_t is None or t < best_t:
+                        best_t = t
+
+            if best_t is None:
+                # Maybe wall is already outside?
+                # Just return target
+                return target_x, target_y
+
+            return origin_x + dx * best_t, origin_y + dy * best_t
+
         for w_p1, w_p2, w_loss in processed_walls:
-            w1x, w1y = w_p1
-            w2x, w2y = w_p2
+            # Wall coordinates in grid space
+            w1x = (w_p1[0] - off_x) / resolution
+            w1y = (w_p1[1] - off_y) / resolution
+            w2x = (w_p2[0] - off_x) / resolution
+            w2y = (w_p2[1] - off_y) / resolution
 
-            # Vector W1->W2
-            v_wall_x = w2x - w1x
-            v_wall_y = w2y - w1y
+            # Project W1 and W2 to boundaries
+            p1_proj = project_to_bounds(ap_gx, ap_gy, w1x, w1y, grid_w, grid_h)
+            p2_proj = project_to_bounds(ap_gx, ap_gy, w2x, w2y, grid_w, grid_h)
 
-            # AP - W1
-            ap_w1_x = ap_x - w1x
-            ap_w1_y = ap_y - w1y
+            # Construct Polygon: W1, W2, P2_proj, P1_proj
+            # Ensure integer coordinates for cv2
+            pts = np.array([
+                [w1x, w1y],
+                [w2x, w2y],
+                [p2_proj[0], p2_proj[1]],
+                [p1_proj[0], p1_proj[1]]
+            ], dtype=np.int32)
 
-            d1 = ap_w1_x * v_wall_y - ap_w1_y * v_wall_x
+            # Reset mask
+            shadow_mask.fill(0)
 
-            # Pixel - W1
-            pix_w1_x = grid_x - w1x
-            pix_w1_y = grid_y - w1y
+            # Draw shadow
+            # Note: fillPoly expects list of polygons
+            cv2.fillPoly(shadow_mask, [pts], 1)
 
-            d2 = pix_w1_x * v_wall_y - pix_w1_y * v_wall_x
-
-            # W1 - AP = - (AP - W1)
-            w1_ap_x = -ap_w1_x
-            w1_ap_y = -ap_w1_y
-
-            # Pixel - AP
-            d3 = w1_ap_x * dy_px - w1_ap_y * dx_px
-
-            # W2 - AP
-            w2_ap_x = w2x - ap_x
-            w2_ap_y = w2y - ap_y
-
-            d4 = w2_ap_x * dy_px - w2_ap_y * dx_px
-
-            cond1 = (d1 * d2) < 0
-            cond2 = (d3 * d4) < 0
-
-            mask = np.logical_and(cond1, cond2)
-
-            # Add loss where mask is True
-            current_wall_loss += (mask * w_loss)
+            # Accumulate loss
+            # Optimization: Use mask to add scalar
+            # current_wall_loss[shadow_mask == 1] += w_loss
+            # Vectorized add with mask
+            current_wall_loss += (shadow_mask * w_loss)
 
         # Vectorized RSSI Calculation
         dist_safe = np.maximum(dist_3d_m, 0.1)
