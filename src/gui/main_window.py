@@ -5,8 +5,8 @@ import math
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
                                QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox,
-                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox, QFormLayout, QToolTip)
-from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter, QMouseEvent, QCursor
+                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox, QFormLayout)
+from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter, QMouseEvent
 from PySide6.QtCore import Qt, QPointF, QRectF
 
 from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsPixmapItem, QGraphicsRectItem
@@ -320,6 +320,12 @@ class MainWindow(QMainWindow):
     def _create_statusbar(self):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
+
+        self.lbl_signal_strength = QLabel("Signal: N/A")
+        self.lbl_signal_strength.setMinimumWidth(150)
+        self.lbl_signal_strength.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.status_bar.addPermanentWidget(self.lbl_signal_strength)
+
         self.status_bar.showMessage("Ready")
 
     # --- Floor Management ---
@@ -838,6 +844,8 @@ class MainWindow(QMainWindow):
             else:
                 mat_name = "Concrete"
                 color = "#000000"
+                # Define default mat_data to avoid UnboundLocalError
+                mat_data = {'name': mat_name, 'loss': {}}
 
             wall_item = WallItem(
                 (self.drawing_start_point.x(), self.drawing_start_point.y()),
@@ -901,7 +909,7 @@ class MainWindow(QMainWindow):
                 self.status_bar.showMessage("Zone Added.")
 
     def handle_canvas_move(self, point):
-        # Heatmap Signal Tooltip
+        # Heatmap Signal Status
         if self.current_canvas and hasattr(self.current_canvas, 'heatmap_data'):
             hd = self.current_canvas.heatmap_data
             if hd:
@@ -924,13 +932,13 @@ class MainWindow(QMainWindow):
                     if 0 <= gy < grid.shape[0] and 0 <= gx < grid.shape[1]:
                         val = grid[gy, gx]
                         if val > -99.0: # Filter noise floor
-                             QToolTip.showText(QCursor.pos(), f"Signal: {val:.1f} dBm")
+                             self.lbl_signal_strength.setText(f"Signal: {val:.1f} dBm")
                         else:
-                             QToolTip.hideText() # Hide if off-grid
+                             self.lbl_signal_strength.setText("Signal: N/A")
                     else:
-                        QToolTip.hideText()
+                        self.lbl_signal_strength.setText("Signal: N/A")
                 else:
-                    pass # Don't hide aggressively, might be over other items
+                     self.lbl_signal_strength.setText("Signal: N/A")
 
         # Update Wall Nodes logic (Handled by WallItem.update_positions called via itemChange in Node)
         # We need to make sure update positions is called.

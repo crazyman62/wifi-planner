@@ -26,6 +26,7 @@ class PlanCanvas(QGraphicsView):
 
         # Navigation flags
         self.setDragMode(QGraphicsView.NoDrag) # We will implement custom drag if needed, or use ScrollHandDrag
+        self.setMouseTracking(True) # Enable hover events for signal inspection
         self._is_panning = False
         self._pan_start = QPointF(0, 0)
         self._mode = "SELECT"
