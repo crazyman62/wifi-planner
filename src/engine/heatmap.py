@@ -24,6 +24,10 @@ def generate_heatmap(
     :param floors_config: List of Floor objects (to look up materials).
     :param floor_z_map: Dict mapping floor_index -> absolute Z.
     :param origin_offset: Tuple (x, y) indicating the top-left coordinate of the grid relative to the scene (0,0).
+
+    :return: Tuple (heatmap_max_grid, ap_grids_dict)
+             heatmap_max_grid: 2D array of max RSSI
+             ap_grids_dict: Dict {ap_name: 2D_RSSI_array}
     """
 
     # Grid dimensions
@@ -31,10 +35,13 @@ def generate_heatmap(
     grid_h = height // resolution
 
     # Initialize grid with a noise floor (e.g. -100 dBm)
-    heatmap = np.full((grid_h, grid_w), -100.0)
+    heatmap_max = np.full((grid_h, grid_w), -100.0)
+
+    # Store individual grids
+    ap_grids = {}
 
     if not access_points:
-        return heatmap
+        return heatmap_max, ap_grids
 
     # Frequency mapping
     freq_map = {
@@ -90,6 +97,7 @@ def generate_heatmap(
     # Calculate for each AP
     for ap in access_points:
         ap_model_name = ap['model']
+        ap_name = ap.get('name', 'Unknown')
         ap_spec = hardware_data.get(ap_model_name)
         if not ap_spec: continue
 
@@ -105,6 +113,7 @@ def generate_heatmap(
         ap_x, ap_y = ap['x'], ap['y']
         ap_z = ap.get('z', 0.0)
         mounting = ap.get('mounting', 'Ceiling')
+        rotation = ap.get('rotation', 0.0)
 
         effective_ap_z = ap_z
 
@@ -134,46 +143,12 @@ def generate_heatmap(
         dist_3d_m = np.sqrt(dist_2d_m**2 + dz**2)
 
         # Antenna Pattern Gain
-        # We pass vectors in METERS (dx_m, dy_m, dz)
-        # Note: dx_m is (Pixel_x - AP_x) / ppm.
-        # This matches the vector from AP to Pixel.
-        current_antenna_gain = get_antenna_gain(dx_m, dy_m, dz, mounting, pattern_data)
-
-        # Total Gain = Isotropic Gain + Pattern Gain
-        # Wait, usually pattern data is normalized to dBi? Or normalized to 0 dB max?
-        # Unifi docs: "reciprocal... high gain".
-        # If we use the pattern data directly (e.g., -2.7 dBi), it's the absolute gain.
-        # So we should use pattern gain INSTEAD of 'gain' from JSON?
-        # Or is 'gain' the peak gain and pattern is relative?
-        # The file values I saw were like -2.7, -3.0.
-        # U6-Pro spec says Gain 6.0 dBi.
-        # File max is around -2.7? Wait.
-        # If spec says 6 dBi, but file says -2.7... maybe file is normalized to 0? Or maybe file is raw simulation relative to isotropic?
-        # If file is raw dBi, then -2.7 is weird for a 6dBi antenna.
-        # Maybe -2.7 dBd? Or maybe the file is relative to peak?
-        # Let's assume pattern data + peak gain offset?
-        # In physics.py I did: `gain_grid = g_az + g_el - peak_gain`.
-        # And I calculated peak_gain from the arrays themselves.
-        # So `gain_grid` is essentially just `g_az + g_el - max(g_az, g_el)`.
-        # If arrays are relative, this preserves the shape.
-        # Then we add `gain_isotropic` (the peak spec gain) to it.
-        # So: Total Gain = Spec_Gain + Pattern_Shape_Delta.
+        current_antenna_gain = get_antenna_gain(dx_m, dy_m, dz, mounting, pattern_data, rotation)
 
         total_gain = gain_isotropic + current_antenna_gain
 
         # Vectorized Wall Loss
         current_wall_loss = np.zeros_like(grid_x)
-
-        # We process walls in a python loop, but vectorize the pixel check for each wall.
-        # This keeps memory usage low compared to broadcasting (N_walls x H x W).
-        # AP is fixed (ap_x, ap_y).
-
-        # For each wall: P1, P2.
-        # We need to check intersection of Segment(AP, Pixel) and Segment(P1, P2).
-        # We use cross products to determine relative orientation.
-
-        # Helper: Cross Product of 2D vectors (Ax, Ay) and (Bx, By) is Ax*By - Ay*Bx
-        # d = (B - A) x (C - A)
 
         for w_p1, w_p2, w_loss in processed_walls:
             w1x, w1y = w_p1
@@ -183,46 +158,30 @@ def generate_heatmap(
             v_wall_x = w2x - w1x
             v_wall_y = w2y - w1y
 
-            # d1 = Direction(W1, W2, AP) = Cross(AP-W1, W2-W1)
             # AP - W1
             ap_w1_x = ap_x - w1x
             ap_w1_y = ap_y - w1y
 
             d1 = ap_w1_x * v_wall_y - ap_w1_y * v_wall_x
 
-            # d2 = Direction(W1, W2, Pixel) = Cross(Pixel-W1, W2-W1)
             # Pixel - W1
             pix_w1_x = grid_x - w1x
             pix_w1_y = grid_y - w1y
 
             d2 = pix_w1_x * v_wall_y - pix_w1_y * v_wall_x
 
-            # d3 = Direction(AP, Pixel, W1) = Cross(W1-AP, Pixel-AP)
             # W1 - AP = - (AP - W1)
             w1_ap_x = -ap_w1_x
             w1_ap_y = -ap_w1_y
 
-            # Pixel - AP = (dx, dy) which we already computed
+            # Pixel - AP
             d3 = w1_ap_x * dy_px - w1_ap_y * dx_px
 
-            # d4 = Direction(AP, Pixel, W2) = Cross(W2-AP, Pixel-AP)
             # W2 - AP
             w2_ap_x = w2x - ap_x
             w2_ap_y = w2y - ap_y
 
             d4 = w2_ap_x * dy_px - w2_ap_y * dx_px
-
-            # Intersection Condition:
-            # ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) AND
-            # ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0))
-
-            # Vectorized condition:
-            # (d1 * d2 < 0) & (d3 * d4 < 0)
-            # Note: This is strict inequality, handles general crossing.
-            # It ignores collinear cases (d=0) which is fine for heatmap scale.
-
-            # We must be careful with d1 being scalar and d2 being array.
-            # d1*d2 < 0 checks signs differ.
 
             cond1 = (d1 * d2) < 0
             cond2 = (d3 * d4) < 0
@@ -233,17 +192,18 @@ def generate_heatmap(
             current_wall_loss += (mask * w_loss)
 
         # Vectorized RSSI Calculation
-        # FSPL
-        # dist_3d_m needs to be maxed with 0.1 to avoid log(0)
         dist_safe = np.maximum(dist_3d_m, 0.1)
         fspl = 20 * np.log10(dist_safe) + 20 * np.log10(freq) - 27.55
 
         rssi_grid = tx_power + total_gain - fspl - current_wall_loss - f_loss
 
-        # Update Heatmap
-        heatmap = np.maximum(heatmap, rssi_grid)
+        # Store individual grid
+        ap_grids[ap_name] = rssi_grid
 
-    return heatmap
+        # Update Max Heatmap
+        heatmap_max = np.maximum(heatmap_max, rssi_grid)
+
+    return heatmap_max, ap_grids
 
 def heatmap_to_pixmap(heatmap, width, height, min_dbm=-85.0, max_dbm=-30.0):
     """

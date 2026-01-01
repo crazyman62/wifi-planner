@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsEllipseItem, QGraphicsItem, QGraphicsSimpleTextItem, QInputDialog, QMenu, QGraphicsRectItem
-from PySide6.QtGui import QPen, QColor, QBrush
+from PySide6.QtGui import QPen, QColor, QBrush, QPolygonF
 from PySide6.QtCore import Qt, QPointF
 
 class WallNodeItem(QGraphicsEllipseItem):
@@ -73,7 +73,7 @@ class WallItem(QGraphicsLineItem):
             self.setLine(line)
 
 class AccessPointItem(QGraphicsEllipseItem):
-    def __init__(self, x, y, model_name, name="AP", mounting="Ceiling", parent=None):
+    def __init__(self, x, y, model_name, name="AP", mounting="Ceiling", rotation=0.0, parent=None):
         # Radius 10px
         r = 10
         # Initialize centered at local (0,0)
@@ -85,6 +85,7 @@ class AccessPointItem(QGraphicsEllipseItem):
         self.model_name = model_name
         self.name = name
         self.mounting = mounting  # "Ceiling" or "Wall"
+        self.rotation = rotation # Degrees 0-360
 
         # Appearance
         self.setBrush(QBrush(QColor("green")))
@@ -111,7 +112,45 @@ class AccessPointItem(QGraphicsEllipseItem):
         r = 10
         x_center = 0 # Center of circle (0,0)
         y_bottom = r + 2
+        # Text does not rotate with AP body because it is a child item.
+        # But we want text to stay upright.
+        # QGraphicsItem children inherit transform.
+        # If we rotate the AP (setRotation), the text will rotate.
+        # We should compensate or keep text separate.
+        # Simple fix: Apply counter-rotation to text.
+        self.text_item.setTransformOriginPoint(rect.center())
+        self.text_item.setRotation(-self.rotation)
         self.text_item.setPos(x_center - rect.width() / 2, y_bottom)
+
+    def set_rotation(self, angle):
+        self.rotation = angle
+        # Rotate the Item itself?
+        # If we use setRotation(), QGraphicsItem handles the visual rotation.
+        # We also store self.rotation for physics.
+        # But if we use setRotation(), we must set transform origin.
+        self.setTransformOriginPoint(0, 0)
+        super().setRotation(angle)
+
+        # Keep text upright
+        if self.text_item:
+             # Reset text rotation relative to parent
+             self.text_item.setRotation(-angle)
+
+             # Need to re-center text if parent rotated?
+             # If parent rotates around (0,0), text at (0, r+2) moves.
+             # We want text to stay at bottom relative to screen?
+             # Or bottom relative to AP?
+             # Standard: Bottom relative to AP (so it rotates around AP).
+             # But user wants text readable.
+             # For now, let text rotate with AP but stay upright?
+             # If AP is Wall mounted (facing Right), text should be below it?
+             # Let's just keep text simple: fixed offset relative to AP, but upright.
+
+             # The position (x,y) of child is relative to parent.
+             # If parent rotates, child position rotates.
+             # To keep text strictly below the AP visually on screen, we need complex logic.
+             # Let's accept that text rotates position with AP, but we keep the text itself unrotated so it's readable.
+             pass
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionChange and self.scene():
@@ -123,7 +162,26 @@ class AccessPointItem(QGraphicsEllipseItem):
             self.setPen(QPen(QColor(Qt.yellow), 2))
         else:
             self.setPen(QPen(Qt.black, 1))
+
+        # Draw Circle
         super().paint(painter, option, widget)
+
+        # Draw Arrow indicating "Front" (0 deg)
+        # Since we use QGraphicsItem rotation, "Front" is always +X in local coords.
+        painter.setPen(QPen(Qt.red, 2))
+        painter.setBrush(QBrush(Qt.red))
+
+        # Arrow pointing Right (+X)
+        # Circle radius is 10.
+        # Draw triangle at (8, 0)
+
+        arrow = QPolygonF([
+            QPointF(0, -4),
+            QPointF(10, 0),
+            QPointF(0, 4)
+        ])
+        painter.drawPolygon(arrow)
+
 
     def contextMenuEvent(self, event):
         menu = QMenu()
