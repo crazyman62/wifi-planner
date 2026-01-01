@@ -5,7 +5,7 @@ import math
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
                                QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox,
-                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox)
+                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox, QFormLayout)
 from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter, QMouseEvent
 from PySide6.QtCore import Qt, QPointF, QRectF
 
