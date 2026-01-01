@@ -147,14 +147,19 @@ class CalibrationDialog(QDialog):
             QMessageBox.warning(self, "Invalid Input", "Please enter a valid positive number.")
 
 class SettingsDialog(QDialog):
-    def __init__(self, current_min_dbm, current_max_dbm, current_snap_dist, parent=None):
+    def __init__(self, project_name, current_min_dbm, current_max_dbm, current_snap_dist, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(300, 200)
+        self.resize(400, 250)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
+        layout.addWidget(QLabel("<b>Project Info</b>"))
+        self.edit_name = QLineEdit(project_name)
+        form.addRow("Project Name:", self.edit_name)
+
+        layout.addSpacing(10)
         layout.addWidget(QLabel("<b>Heatmap Visualization (dBm)</b>"))
         self.spin_max = QSpinBox()
         self.spin_max.setRange(-100, 0)
@@ -181,7 +186,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
 
     def get_values(self):
-        return (self.spin_min.value(), self.spin_max.value(), self.spin_snap.value())
+        return (self.edit_name.text(), self.spin_min.value(), self.spin_max.value(), self.spin_snap.value())
 
 
 class AddFloorDialog(QDialog):
