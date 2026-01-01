@@ -5,7 +5,7 @@ import math
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QHBoxLayout, QPushButton, QFileDialog, QLabel,
                                QToolBar, QStatusBar, QComboBox, QListWidget, QSpinBox,
-                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox)
+                               QInputDialog, QTabWidget, QDoubleSpinBox, QMenu, QMessageBox, QFormLayout)
 from PySide6.QtGui import QAction, QIcon, QPen, QColor, QImage, QPainter, QMouseEvent
 from PySide6.QtCore import Qt, QPointF, QRectF
 
@@ -41,10 +41,22 @@ class MainWindow(QMainWindow):
         sidebar_widget = QWidget()
         self.sidebar_layout = QVBoxLayout(sidebar_widget)
 
+        # Top Toolbar
+        self.top_toolbar_widget = QWidget()
+        self.top_toolbar_layout = QHBoxLayout(self.top_toolbar_widget)
+        self.top_toolbar_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Right Side (Toolbar + Tabs)
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(self.top_toolbar_widget)
+        right_layout.addWidget(self.tabs)
+
         container = QWidget()
         main_layout = QHBoxLayout(container)
         main_layout.addWidget(sidebar_widget, stretch=1)
-        main_layout.addWidget(self.tabs, stretch=5)
+        main_layout.addWidget(right_widget, stretch=5)
         self.setCentralWidget(container)
 
         # State
@@ -65,6 +77,7 @@ class MainWindow(QMainWindow):
         # Build UI
         self._create_menus()
         self._create_sidebar()
+        self._create_top_toolbar()
         self._create_statusbar()
 
         # Canvas Event Handling State
@@ -249,36 +262,55 @@ class MainWindow(QMainWindow):
 
         self.sidebar_layout.addLayout(align_layout)
 
-        # Wall Material
-        self.sidebar_layout.addSpacing(10)
-        self.sidebar_layout.addWidget(QLabel("<b>Wall Material</b>"))
-        self.combo_materials = QComboBox()
-        # Parse material names from complex structure
-        wall_mats = self.materials_data.get('materials', [])
-        self.combo_materials.addItems([m['name'] for m in wall_mats])
-        self.sidebar_layout.addWidget(self.combo_materials)
-
-        # AP Selection
-        self.sidebar_layout.addWidget(QLabel("<b>AP Model</b>"))
-        self.combo_aps = QComboBox()
-        if self.hardware_data:
-            self.combo_aps.addItems(list(self.hardware_data.keys()))
-        self.sidebar_layout.addWidget(self.combo_aps)
-
-        # Band Selection
-        self.sidebar_layout.addWidget(QLabel("<b>Frequency Band</b>"))
-        self.combo_band = QComboBox()
-        self.combo_band.addItems(["2.4", "5", "6"])
-        self.combo_band.setCurrentText("5")
-        self.combo_band.currentIndexChanged.connect(self.trigger_heatmap)
-        self.sidebar_layout.addWidget(self.combo_band)
-
         self.sidebar_layout.addStretch()
 
         # Settings
         self.btn_settings = QPushButton("Settings")
         self.btn_settings.clicked.connect(self.open_settings)
+        self.sidebar_layout.addSpacing(10)
+        self.sidebar_layout.addWidget(QLabel("<b>Properties</b>"))
+
+        self.zone_props_widget = QWidget()
+        zp_layout = QFormLayout(self.zone_props_widget)
+        self.spin_zone_height = QDoubleSpinBox()
+        self.spin_zone_height.setRange(0, 50)
+        self.spin_zone_height.setSuffix(" m")
+        self.spin_zone_height.valueChanged.connect(self.update_selected_zone_height)
+        zp_layout.addRow("Zone Height:", self.spin_zone_height)
+        self.sidebar_layout.addWidget(self.zone_props_widget)
+        self.zone_props_widget.hide()
+
         self.sidebar_layout.addWidget(self.btn_settings)
+
+    def _create_top_toolbar(self):
+        # Wall Material
+        self.top_toolbar_layout.addWidget(QLabel("<b>Wall Material:</b>"))
+        self.combo_materials = QComboBox()
+        # Parse material names from complex structure
+        wall_mats = self.materials_data.get('materials', [])
+        self.combo_materials.addItems([m['name'] for m in wall_mats])
+        self.top_toolbar_layout.addWidget(self.combo_materials)
+
+        self.top_toolbar_layout.addSpacing(20)
+
+        # AP Selection
+        self.top_toolbar_layout.addWidget(QLabel("<b>AP Model:</b>"))
+        self.combo_aps = QComboBox()
+        if self.hardware_data:
+            self.combo_aps.addItems(list(self.hardware_data.keys()))
+        self.top_toolbar_layout.addWidget(self.combo_aps)
+
+        self.top_toolbar_layout.addSpacing(20)
+
+        # Band Selection
+        self.top_toolbar_layout.addWidget(QLabel("<b>Frequency Band:</b>"))
+        self.combo_band = QComboBox()
+        self.combo_band.addItems(["2.4", "5", "6"])
+        self.combo_band.setCurrentText("5")
+        self.combo_band.currentIndexChanged.connect(self.trigger_heatmap)
+        self.top_toolbar_layout.addWidget(self.combo_band)
+
+        self.top_toolbar_layout.addStretch()
 
     def _create_statusbar(self):
         self.status_bar = QStatusBar()
@@ -306,7 +338,9 @@ class MainWindow(QMainWindow):
         if not floor: return
 
         initial_data = floor.to_dict()
-        dialog = AddFloorDialog(self.floor_material_names, self, initial_data=initial_data)
+        wall_mats = self.materials_data.get('materials', [])
+        wall_mat_names = [m['name'] for m in wall_mats]
+        dialog = AddFloorDialog(self.floor_material_names, wall_mat_names, self, initial_data=initial_data)
 
         if dialog.exec():
             data = dialog.get_data()
@@ -317,18 +351,71 @@ class MainWindow(QMainWindow):
             floor.material_name = data['material']
             floor.ceiling_height = data['ceiling_height']
 
-            if data['image_path'] and data['image_path'] != floor.image_path:
-                # Image Changed: Sync old items to model first?
-                # If we rely on model being source of truth for items during reload,
-                # we must ensure model is up to date with scene.
+            # Check for changes that require scene refresh
+            image_changed = (data['image_path'] and data['image_path'] != floor.image_path)
+            detected_walls = data.get('detected_walls')
+
+            if image_changed or detected_walls:
                 canvas = self.tabs.widget(index)
                 if canvas:
-                    # Sync scene -> floor object
-                    self._sync_canvas_to_floor(canvas, floor)
+                    # Sync scene -> floor object (preserve other items if only walls updated?)
+                    # If we auto-detected walls, we are replacing existing walls.
+                    # But we might want to keep APs/Zones.
+                    # _sync_canvas_to_floor overwrites floor.walls/aps/regions from scene.
+                    # We should probably sync APs/Regions but NOT walls if we are about to overwrite them.
 
-                    floor.image_path = data['image_path']
+                    # 1. Capture current APs/Zones from Scene
+                    current_aps = []
+                    current_zones = []
+                    for item in canvas.scene.items():
+                         if isinstance(item, AccessPointItem):
+                            current_aps.append({
+                                'x': item.scenePos().x(),
+                                'y': item.scenePos().y(),
+                                'model': item.model_name,
+                                'name': item.name
+                            })
+                         elif isinstance(item, ZoneItem):
+                             r = item.sceneBoundingRect()
+                             current_zones.append({
+                                 'rect': [r.x(), r.y(), r.width(), r.height()],
+                                 'height': item.ceiling_height
+                             })
 
-                    # Clear Scene Items (except background which load_image handles, but we need to clear walls/aps)
+                    # 2. Update Floor Object
+                    floor.access_points = current_aps
+                    floor.regions = current_zones
+
+                    if image_changed:
+                        floor.image_path = data['image_path']
+
+                    if detected_walls:
+                        floor.walls = detected_walls
+                        self.status_bar.showMessage(f"Updated walls: {len(detected_walls)} segments.")
+                    elif image_changed:
+                         # If image changed but no new walls detected, should we keep old walls?
+                         # Usually walls belong to the image.
+                         # Logic in original code: _sync_canvas_to_floor saved them.
+                         # So they are preserved. But they might be misaligned.
+                         # User responsibility.
+                         # We already synced walls via _sync_canvas_to_floor?
+                         # Wait, I removed _sync_canvas_to_floor call above.
+                         # So currently floor.walls has old data (from previous to_dict call or load).
+                         # We should probably sync walls too IF we are not overwriting them.
+
+                         # Capture walls from scene just in case we need them
+                         current_walls = []
+                         for item in canvas.scene.items():
+                            if isinstance(item, WallItem):
+                                l = item.line()
+                                current_walls.append({
+                                    'p1': (l.x1(), l.y1()),
+                                    'p2': (l.x2(), l.y2()),
+                                    'material': item.material_name
+                                })
+                         floor.walls = current_walls
+
+                    # 3. Refresh Scene
                     canvas.scene.clear()
 
                     # Reload Image
@@ -401,7 +488,9 @@ class MainWindow(QMainWindow):
             self.trigger_heatmap()
 
     def show_add_floor_dialog(self):
-        dialog = AddFloorDialog(self.floor_material_names, self)
+        wall_mats = self.materials_data.get('materials', [])
+        wall_mat_names = [m['name'] for m in wall_mats]
+        dialog = AddFloorDialog(self.floor_material_names, wall_mat_names, self)
         if dialog.exec():
             data = dialog.get_data()
             new_floor = Floor(
@@ -411,6 +500,12 @@ class MainWindow(QMainWindow):
                 image_path=data['image_path']
             )
             new_floor.ceiling_height = data['ceiling_height']
+
+            # Auto-Detect Walls
+            detected_walls = data.get('detected_walls')
+            if detected_walls:
+                new_floor.walls = detected_walls
+                self.status_bar.showMessage(f"Added floor with {len(detected_walls)} detected walls.")
 
             self.project.add_floor(new_floor)
             self._add_tab_for_floor(new_floor)
@@ -864,10 +959,30 @@ class MainWindow(QMainWindow):
     def on_selection_changed(self):
         if not self.current_canvas: return
         selected = self.current_canvas.scene.selectedItems()
-        if len(selected) == 1 and isinstance(selected[0], AccessPointItem):
-            self.selected_item_start_pos = selected[0].pos()
+
+        self.zone_props_widget.hide()
+
+        if len(selected) == 1:
+            item = selected[0]
+            if isinstance(item, AccessPointItem):
+                self.selected_item_start_pos = item.pos()
+            elif isinstance(item, ZoneItem):
+                self.selected_item_start_pos = None
+                self.zone_props_widget.show()
+                self.spin_zone_height.blockSignals(True)
+                self.spin_zone_height.setValue(item.ceiling_height)
+                self.spin_zone_height.blockSignals(False)
+            else:
+                 self.selected_item_start_pos = None
         else:
             self.selected_item_start_pos = None
+
+    def update_selected_zone_height(self, val):
+        if not self.current_canvas: return
+        selected = self.current_canvas.scene.selectedItems()
+        if len(selected) == 1 and isinstance(selected[0], ZoneItem):
+            selected[0].set_height(val)
+            self.trigger_heatmap()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Delete:

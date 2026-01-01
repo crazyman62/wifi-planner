@@ -68,7 +68,7 @@ class Project:
 
         # Global Settings
         self.snap_threshold = 5
-        self.heatmap_min_dbm = -85
+        self.heatmap_min_dbm = -65
         self.heatmap_max_dbm = -30
         self.next_ap_id = 1
 
@@ -102,7 +102,7 @@ class Project:
 
         settings = data.get('settings', {})
         project.snap_threshold = settings.get('snap_threshold', 15)
-        project.heatmap_min_dbm = settings.get('heatmap_min_dbm', -85)
+        project.heatmap_min_dbm = settings.get('heatmap_min_dbm', -65)
         project.heatmap_max_dbm = settings.get('heatmap_max_dbm', -30)
 
         for f_data in data.get('floors', []):
