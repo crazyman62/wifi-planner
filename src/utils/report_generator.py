@@ -96,8 +96,9 @@ class PDFReport:
         self.elements.append(Spacer(1, 20))
 
         # List all APs with names
-        data = [['Name', 'Model', 'Floor']] # Added Floor column if available in AP data?
-        # AP data might be [{'name':..., 'model':..., 'floor':...}]
+        # access_points list now expects enriched data including radios
+        headers = ['Name', 'Model', 'Floor', '2.4 GHz', '5 GHz', '6 GHz']
+        data = [headers]
 
         # Sort by name
         sorted_aps = sorted(access_points, key=lambda x: x.get('name', ''))
@@ -105,10 +106,25 @@ class PDFReport:
         for ap in sorted_aps:
             name = ap.get('name', 'N/A')
             model = ap.get('model', 'Unknown')
-            floor = ap.get('floor_name', '-') # Assuming we enrich this data
-            data.append([name, model, floor])
+            floor = ap.get('floor_name', '-')
 
-        table = Table(data, colWidths=[150, 250, 150])
+            radios = ap.get('radios', {})
+
+            def fmt_radio(band):
+                r = radios.get(band, {})
+                ch = r.get('channel', 'Auto')
+                width = r.get('width', 20)
+                pwr = r.get('power', 'Auto')
+                return f"Ch {ch}\n({width}MHz)\n{pwr}"
+
+            c24 = fmt_radio('2.4')
+            c5 = fmt_radio('5')
+            c6 = fmt_radio('6')
+
+            data.append([name, model, floor, c24, c5, c6])
+
+        # Adjust column widths
+        table = Table(data, colWidths=[80, 120, 80, 80, 80, 80])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),

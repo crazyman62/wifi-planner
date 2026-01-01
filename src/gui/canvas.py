@@ -145,8 +145,8 @@ class PlanCanvas(QGraphicsView):
             self.pixmap_item.setPos(x, y)
             self.pixmap_item.setRotation(rotation)
             self.pixmap_item.setScale(scale)
-            # Update Scene Rect if needed, or let it grow
-            # self.setSceneRect(self.pixmap_item.sceneBoundingRect())
+            # Force update of scene rect to include negative areas if moved there
+            self.setSceneRect(self.scene.itemsBoundingRect())
 
     def wheelEvent(self, event: QWheelEvent):
         """
@@ -254,6 +254,10 @@ class PlanCanvas(QGraphicsView):
             # Emit release signal for move tracking
             scene_pos = self.mapToScene(event.position().toPoint())
             self.mouse_released.emit(scene_pos)
+
+            # Update Scene Rect after potentially moving items (like the floor plan)
+            self.setSceneRect(self.scene.itemsBoundingRect())
+
             super().mouseReleaseEvent(event)
         else:
             super().mouseReleaseEvent(event)

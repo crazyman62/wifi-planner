@@ -73,7 +73,7 @@ class WallItem(QGraphicsLineItem):
             self.setLine(line)
 
 class AccessPointItem(QGraphicsEllipseItem):
-    def __init__(self, x, y, model_name, name="AP", mounting="Ceiling", rotation=0.0, parent=None):
+    def __init__(self, x, y, model_name, name="AP", mounting="Ceiling", rotation=0.0, radios=None, parent=None):
         # Radius 10px
         r = 10
         # Initialize centered at local (0,0)
@@ -86,6 +86,17 @@ class AccessPointItem(QGraphicsEllipseItem):
         self.name = name
         self.mounting = mounting  # "Ceiling" or "Wall"
         self.rotation = rotation # Degrees 0-360
+
+        # Radios Configuration
+        # Default if None
+        if radios is None:
+            self.radios = {
+                '2.4': {'channel': 'Auto', 'width': 20, 'power': 'Auto', 'manual': False},
+                '5':   {'channel': 'Auto', 'width': 40, 'power': 'Auto', 'manual': False},
+                '6':   {'channel': 'Auto', 'width': 80, 'power': 'Auto', 'manual': False}
+            }
+        else:
+            self.radios = radios
 
         # Appearance
         self.setBrush(QBrush(QColor("green")))
