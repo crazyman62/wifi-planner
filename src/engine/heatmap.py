@@ -14,7 +14,8 @@ def generate_heatmap(
     target_z=0.0,
     floors_config=None,
     floor_z_map=None,
-    origin_offset=(0, 0)
+    origin_offset=(0, 0),
+    receiver_height=1.0
 ):
     """
     Generates a heatmap grid for the floor plan.
@@ -24,6 +25,7 @@ def generate_heatmap(
     :param floors_config: List of Floor objects (to look up materials).
     :param floor_z_map: Dict mapping floor_index -> absolute Z.
     :param origin_offset: Tuple (x, y) indicating the top-left coordinate of the grid relative to the scene (0,0).
+    :param receiver_height: Height of the receiver above the floor in meters.
 
     :return: Tuple (heatmap_max_grid, ap_grids_dict)
              heatmap_max_grid: 2D array of max RSSI
@@ -126,7 +128,7 @@ def generate_heatmap(
         if f_loss > 100:
             continue
 
-        receiver_z = target_z + 1.0
+        receiver_z = target_z + receiver_height
         dz = effective_ap_z - receiver_z # Z diff in meters (AP - Rx)
 
         # --- Vectorized Calculations ---
