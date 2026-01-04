@@ -1545,13 +1545,16 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self.project.name,
                                 self.project.heatmap_min_dbm,
                                 self.project.heatmap_max_dbm,
-                                self.project.snap_threshold, self)
+                                self.project.snap_threshold,
+                                self.project.receiver_height,
+                                self)
         if dialog.exec():
             v = dialog.get_values()
             self.project.name = v[0]
             self.project.heatmap_min_dbm = v[1]
             self.project.heatmap_max_dbm = v[2]
             self.project.snap_threshold = v[3]
+            self.project.receiver_height = v[4]
 
     def export_report(self):
         # Check Project Name

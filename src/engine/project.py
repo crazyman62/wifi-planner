@@ -68,6 +68,7 @@ class Project:
 
         # Global Settings
         self.snap_threshold = 5
+        self.receiver_height = 1.0 # Default receiver height in meters (approx 3.3 ft)
         self.heatmap_min_dbm = -65
         self.heatmap_max_dbm = -30
         self.next_ap_id = 1
@@ -90,6 +91,7 @@ class Project:
             'next_ap_id': self.next_ap_id,
             'settings': {
                 'snap_threshold': self.snap_threshold,
+                'receiver_height': self.receiver_height,
                 'heatmap_min_dbm': self.heatmap_min_dbm,
                 'heatmap_max_dbm': self.heatmap_max_dbm
             }
@@ -102,6 +104,7 @@ class Project:
 
         settings = data.get('settings', {})
         project.snap_threshold = settings.get('snap_threshold', 15)
+        project.receiver_height = settings.get('receiver_height', 1.0)
         project.heatmap_min_dbm = settings.get('heatmap_min_dbm', -65)
         project.heatmap_max_dbm = settings.get('heatmap_max_dbm', -30)
 

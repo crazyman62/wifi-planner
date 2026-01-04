@@ -147,10 +147,10 @@ class CalibrationDialog(QDialog):
             QMessageBox.warning(self, "Invalid Input", "Please enter a valid positive number.")
 
 class SettingsDialog(QDialog):
-    def __init__(self, project_name, current_min_dbm, current_max_dbm, current_snap_dist, parent=None):
+    def __init__(self, project_name, current_min_dbm, current_max_dbm, current_snap_dist, current_rx_height=1.0, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(400, 250)
+        self.resize(400, 300)
 
         layout = QVBoxLayout(self)
         form = QFormLayout()
@@ -158,6 +158,16 @@ class SettingsDialog(QDialog):
         layout.addWidget(QLabel("<b>Project Info</b>"))
         self.edit_name = QLineEdit(project_name)
         form.addRow("Project Name:", self.edit_name)
+
+        layout.addSpacing(10)
+        layout.addWidget(QLabel("<b>Simulation Parameters</b>"))
+        self.spin_rx_height = QDoubleSpinBox()
+        self.spin_rx_height.setRange(0.1, 5.0)
+        self.spin_rx_height.setSingleStep(0.1)
+        self.spin_rx_height.setValue(current_rx_height)
+        self.spin_rx_height.setSuffix(" m")
+        self.spin_rx_height.setToolTip("Height of the receiving device (e.g. 1.0m is ~3.3ft)")
+        form.addRow("Receiver Height:", self.spin_rx_height)
 
         layout.addSpacing(10)
         layout.addWidget(QLabel("<b>Heatmap Visualization (dBm)</b>"))
@@ -186,7 +196,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
 
     def get_values(self):
-        return (self.edit_name.text(), self.spin_min.value(), self.spin_max.value(), self.spin_snap.value())
+        return (self.edit_name.text(), self.spin_min.value(), self.spin_max.value(), self.spin_snap.value(), self.spin_rx_height.value())
 
 
 class AddFloorDialog(QDialog):
